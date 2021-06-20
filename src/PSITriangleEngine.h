@@ -4,15 +4,10 @@
 
 #pragma once
 
-#define PSI_AUDIO_SUPPORT true
-
 #include "PSIGlobals.h"
 
 #include "PSIVideo.h"
-#ifdef PSI_AUDIO_SUPPORT
 #include "PSIAudio.h"
-#endif
-
 #include "PSIGLUtils.h"
 #include "PSIGLRenderer.h"
 #include "PSIGLTexture.h"
