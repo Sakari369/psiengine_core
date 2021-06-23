@@ -20,7 +20,6 @@ GLfloat smootherstep(GLfloat edge0, GLfloat edge1, GLfloat x)
 }
 */
 
-// Get angle in radians between two co-ordinates
 GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1,
                                  const GLfloat x2, const GLfloat y2) {
 	GLfloat angle_rad;
@@ -62,5 +61,13 @@ GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1,
 
 	return angle_rad;
 };
+
+glm::vec2 calc_poly_vertex(GLuint num_points, GLfloat radius, GLfloat angle_deg, GLuint vertex_index) {
+	GLfloat angle_rad = glm::radians(angle_deg) + ((TWO_PI / num_points) * vertex_index);
+	GLfloat x = (sin(angle_rad) * radius);
+	GLfloat y = (cos(angle_rad) * radius);
+
+	return glm::vec2(x, y);
+}
 
 }

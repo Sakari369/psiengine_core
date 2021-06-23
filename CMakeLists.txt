@@ -1,7 +1,7 @@
 project (psicore)
 set(CMAKE_BUILD_TYPE Release)
 
-cmake_minimum_required (VERSION 3.0)
+cmake_minimum_required (VERSION 3.2)
 set(PSI_ARCH "macos_x64")
 
 # Add module path
@@ -67,6 +67,7 @@ set(SOURCES
 	src/PSITextRenderer.cpp
 	src/PSITimeDisplay.cpp
 	src/PSIGLTFLoader.cpp 
+	src/PSIPrismGeometry.cpp 
 )
 
 set(HEADER_FILES, 
@@ -109,6 +110,7 @@ set(HEADER_FILES,
 	src/PSITextRenderer.h
 	src/PSITimeDisplay.h
 	src/PSIGLTFLoader.h 
+	src/PSIPrismGeometry.h
 )
 	
 add_library(${PROJECT_NAME} STATIC ${SOURCES})

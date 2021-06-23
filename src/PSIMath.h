@@ -31,6 +31,7 @@ namespace PSI {
 	};
 }
 
+// TODO: define these as constants, and under PSI::math namespace ?
 // Unit lengths. 
 // Use 1 meter as the base unit.
 #define UL_M 		1.0f
@@ -73,8 +74,11 @@ struct velocity {
 	Type direction;
 };
 
-extern GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1,
-                                        const GLfloat x2, const GLfloat y2);
+// Calculate angle in radians between two co-ordinates.
+extern GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1, const GLfloat x2, const GLfloat y2);
+
+// Calculate a vertex point of a closed N -polygon.
+extern glm::vec2 calc_poly_vertex(GLuint num_points, GLfloat radius, GLfloat angle_deg, GLuint vertex_index);
 
 // Angle unit conversions.
 // Limit values.

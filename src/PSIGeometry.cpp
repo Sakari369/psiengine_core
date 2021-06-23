@@ -3,8 +3,6 @@
 namespace PSIGeometry {
 
 void add_buffer_defaults(const SharedGeometryData &geom) {
-	// Let's add the buffer info and attributes also
-	// We have 4 buffers, and 4 attributes
 	geom->buffers = {
 		{ 
 			PSIGLMesh::BufferName::POSITION,
@@ -136,6 +134,13 @@ SharedGeometryData tetrahedron() {
 
 SharedGeometryData cuboid(GLfloat width, GLfloat height, GLfloat depth) {
 	SharedGeometryData geom = PSIGeometry::Cuboid::cuboid(width, height, depth);
+	add_buffer_defaults(geom);
+
+	return geom;
+}
+
+SharedGeometryData prism(GLfloat radius, GLfloat depth) {
+	SharedGeometryData geom = PSIGeometry::Prism::prism(radius, depth);
 	add_buffer_defaults(geom);
 
 	return geom;

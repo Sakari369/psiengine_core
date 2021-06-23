@@ -21,6 +21,7 @@
 #include "PSIQuadGeometry.h"
 #include "PSIIcosahedronGeometry.h"
 #include "PSITetrahedronGeometry.h"
+#include "PSIPrismGeometry.h"
 
 namespace PSIGeometry {
 	// Shared geometry data type.
@@ -30,6 +31,7 @@ namespace PSIGeometry {
 	SharedGeometryData cube();
 	SharedGeometryData cube_tetrahedron();
 	SharedGeometryData tetrahedron();
+	SharedGeometryData prism(GLfloat radius, GLfloat depth);
 	SharedGeometryData cube_inverted();
 	SharedGeometryData cuboid(GLfloat width, GLfloat height, GLfloat depth);
 	SharedGeometryData plane(GLint rows, GLboolean repeat_texture);
