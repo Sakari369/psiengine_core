@@ -13,11 +13,27 @@ namespace PSI {
 	// Triangle with three points.
 	struct triangle {
 		glm::vec3 p[3];
+
+		glm::vec3& operator[] (int index) {
+			return p[index];
+		}
+
+		const glm::vec3& operator[] (int index) const {
+			return p[index];
+		}
 	};
 
 	// Indexes for a triangle.
 	struct tri_indexes {
 		GLint i[3];
+
+		GLint operator[] (int index) {
+			return i[index];
+		}
+
+		const GLint operator[] (int index) const {
+			return i[index];
+		}
 	};
 
 	// Quad made out of two triangles.
@@ -28,6 +44,14 @@ namespace PSI {
 	// Quad with four vertices.
 	struct quad_buf {
 		glm::vec3 p[4];
+
+		glm::vec3& operator[] (int index) {
+			return p[index];
+		}
+
+		const glm::vec3& operator[] (int index) const {
+			return p[index];
+		}
 	};
 }
 
