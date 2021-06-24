@@ -1,4 +1,5 @@
 #include "PSIMath.h"
+#include "PSIGLUtils.h"
 
 namespace PSIMath {
 
@@ -68,6 +69,10 @@ glm::vec2 calc_poly_vertex(GLuint num_points, GLfloat radius, GLfloat angle_deg,
 	GLfloat y = (cos(angle_rad) * radius);
 
 	return glm::vec2(x, y);
+}
+
+glm::vec3 calc_tri_normal(const PSI::triangle &tri) {
+	return glm::triangleNormal(tri[0], tri[1], tri[2]);
 }
 
 }

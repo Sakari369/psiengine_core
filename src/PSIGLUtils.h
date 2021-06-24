@@ -16,12 +16,14 @@
 #define check_gl_error()	PSIGLUtils::check_error(__FILE__, __LINE__)
 #define print_glm_vecs(x)	PSIGLUtils::print_vectors_of_glm(#x, x)
 #define print_vecs(x)	        PSIGLUtils::print_vectors(#x, x)
+#define print_vec(x)	        PSIGLUtils::print_glm_vec(#x, x)
+#define print_vec_named(n, x)	PSIGLUtils::print_glm_vec(n, x)
 #define GLM_CSTR(x)		glm::to_string(x).c_str()
 
 namespace PSIGLUtils {
 	template <typename T>
-	void print_glm_vec(T vec) {
-		std::cout << glm::to_string(vec) << std::endl;
+	void print_glm_vec(std::string name, T vec) {
+		std::cout << name << "=" << glm::to_string(vec) << std::endl;
 	}
 
 	template <typename T>

@@ -112,6 +112,9 @@ extern GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1, cons
 // Calculate a vertex point of a closed N -polygon.
 extern glm::vec2 calc_poly_vertex(GLuint num_points, GLfloat radius, GLfloat angle_deg, GLuint vertex_index);
 
+// Calculate normal vector for a triangle.
+extern glm::vec3 calc_tri_normal(const PSI::triangle &tri);
+
 // Angle unit conversions.
 // Limit values.
 template <typename Type> inline

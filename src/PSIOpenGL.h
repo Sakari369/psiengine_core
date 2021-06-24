@@ -25,6 +25,8 @@
 #include <glm/gtx/string_cast.hpp>
 // Angles.
 #include <glm/gtx/vector_angle.hpp>
+// Triangle normals.
+#include <glm/gtx/normal.hpp>
 
 // Glew and GLFW
 #include <GL/glew.h>

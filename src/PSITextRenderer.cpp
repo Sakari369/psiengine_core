@@ -234,7 +234,7 @@ PSITextRenderer::unique_data PSITextRenderer::bake_text(const shared_ptr<PSIFont
 			data->texcoords.insert(data->texcoords.end(), texcoords.begin(), texcoords.end());
 
 			// Indexes.
-			std::array<GLuint, 6> char_quad_indexes = PSIGeometry::Quad::get_quad_indexes(i);
+			std::array<GLuint, 6> char_quad_indexes = PSIGeometry::Quad::calc_quad_indexes(i);
 			data->indexes.insert  (data->indexes.end(), char_quad_indexes.begin(), char_quad_indexes.end());
 			
 			// We don't want to offset the glyphs for a timer usecase where we only want to display

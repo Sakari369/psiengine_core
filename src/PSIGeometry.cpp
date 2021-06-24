@@ -71,22 +71,22 @@ SharedGeometryData cube_tetrahedron() {
 	const std::vector<PSI::triangle> &tf = PSIGeometry::CubeTetrahedron::faces;
 
 	glm::vec3 normal;
-	normal = glm::normalize(glm::cross(tf[0].p[1] - tf[0].p[0], tf[0].p[2] - tf[0].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[0]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[1].p[1] - tf[1].p[0], tf[1].p[2] - tf[1].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[1]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[2].p[1] - tf[2].p[0], tf[2].p[2] - tf[2].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[2]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[3].p[1] - tf[3].p[0], tf[3].p[2] - tf[3].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[3]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
@@ -107,22 +107,22 @@ SharedGeometryData tetrahedron() {
 	const std::vector<PSI::triangle> &tf = PSIGeometry::Tetrahedron::faces;
 
 	glm::vec3 normal;
-	normal = glm::normalize(glm::cross(tf[0].p[1] - tf[0].p[0], tf[0].p[2] - tf[0].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[0]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[1].p[1] - tf[1].p[0], tf[1].p[2] - tf[1].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[1]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[2].p[1] - tf[2].p[0], tf[2].p[2] - tf[2].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[2]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(tf[3].p[1] - tf[3].p[0], tf[3].p[2] - tf[3].p[0]));
+	normal = PSIMath::calc_tri_normal(tf[3]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);

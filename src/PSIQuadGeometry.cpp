@@ -59,12 +59,13 @@ std::array<glm::vec3, 4> quad(glm::vec2 origin, glm::vec2 radius) {
 	return quad;
 }
 
-std::array<GLuint, 6> get_quad_indexes(GLint quad_index) {
+std::array<GLuint, 6> calc_quad_indexes(GLint quad_index_offset) {
 	// Copy the triangle indexes to indexed indexes.
 	std::array<GLuint, 6> indexes = {{0,1,2, 0,2,3}};
 
-	// Need to add offset to each vertex index.
-	GLint vertex_offset = 4 * quad_index;
+	// Add offset to each vertex index, so that we can generate indexes
+	// for a quad positioned at this index inside an array of indexes.
+	GLint vertex_offset = 4 * quad_index_offset;
 
 	indexes[0] += vertex_offset;
 	indexes[1] += vertex_offset;

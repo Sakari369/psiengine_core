@@ -36,69 +36,60 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	//  This matches when looking at the object from +Z to .. -Z direction.
 	//  Meaning the camera is pointing towards +Z, or towards the viewer.
 
+	// Calculate front and back faces so that front and back are translated in equal distance from 0.
+
 	// Front triangle face.
-	const PSI::triangle f = {
+	const PSI::triangle ft = {
 		{ glm::vec3(tri_verts[0], -depth/2.0f), 
 		  glm::vec3(tri_verts[1], -depth/2.0f), 
 		  glm::vec3(tri_verts[2], -depth/2.0f) }
 	};
 
 	// Back triangle face.
-	const PSI::triangle b = {
+	const PSI::triangle bt = {
 		{ glm::vec3(tri_verts[0], depth/2.0f), 
 		  glm::vec3(tri_verts[1], depth/2.0f), 
 		  glm::vec3(tri_verts[2], depth/2.0f) }
 	};
 
 	// Connect the triangle faces with quads on all three sides of the prism.
-	//
-	// We should be able to define these just as quads with 4 vertices.
 
-	// Right quad tri 0.
-	const PSI::triangle r0 = {
-		f[0], b[0], f[1]
-	};
-	// Right quad tri 1.
-	const PSI::triangle r1 = {
-		f[1], b[0], b[1]
-	};
+	// Right quad, upper and lower triangles.
+	const PSI::quad rq = {{
+		{ ft[0], bt[0], ft[1] },
+		{ ft[1], bt[0], bt[1] }
+	}};
+	// Bottom quad, upper and lower triangles.
+	const PSI::quad bq = {{
+		{ ft[2], bt[2], bt[1] },
+		{ ft[2], bt[1], ft[1] }
+	}};
+	// Left quad, upper and lower triangles.
+	const PSI::quad lq = {{
+		{ ft[0], bt[2], ft[2] },
+		{ ft[0], bt[0], bt[2] }
+	}};
 
-	// Bottom quad tri 0.
-	const PSI::triangle b0 = {
-		f[2], b[2], b[1]
-	};
-	// Bottom quad tri 1.
-	const PSI::triangle b1 = {
-		f[2], b[1], f[1]
-	};
-
-	// Left quad tri 0.
-	const PSI::triangle l0 = {
-		f[0], b[2], f[2]
-	};
-	// Left quad tri 1.
-	const PSI::triangle l1 = {
-		f[0], b[0], b[2]
-	};
-
-	// Do we need actually all the positions ?
 	const std::vector<glm::vec3> positions = {
 		// Front triangle, cw.
-		f[0], f[1], f[2],
+		ft[0], ft[1], ft[2],
 		// Back triangle, ccw.
-		b[2], b[1], b[0],
+		bt[2], bt[1], bt[0],
+
 		// Right upper, cw.
-		r0[0], r0[1], r0[2],
+		rq[0][0], rq[0][1], rq[0][2],
 		// Right lower, cw.
-		r1[0], r1[1], r1[2],
-		// Left upper, ccw.
-		l0[2], l0[1], l0[0],
-		// Left lower, ccw.
-		l1[2], l1[1], l1[0],
+		rq[1][0], rq[1][1], rq[1][2],
+
 		// Bottom upper, ccw.
-		b0[2], b0[1], b0[0],
+		bq[0][2], bq[0][1], bq[0][0],
 		// Bottom lower, ccw.
-		b1[2], b1[1], b1[0]
+		bq[1][2], bq[1][1], bq[1][0],
+
+		// Left upper, ccw.
+		lq[0][2], lq[0][1], lq[0][0],
+		// Left lower, ccw.
+		lq[1][2], lq[1][1], lq[1][0],
 	};
 
 	const std::vector<GLuint> indexes = {
@@ -115,29 +106,92 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		21, 22, 23 
 	};
 
+	shared_data geom = make_shared<PSIGeometryData>();
+	
+	// Front.
+	glm::vec3 normal;
+	//normal = PSIMath::calc_tri_normal(ft);
+	normal = glm::triangleNormal(ft[0], ft[1], ft[2]);
+	print_vec(ft[0]);
+	print_vec(ft[1]);
+	print_vec_named("ft_norm", normal);
+
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	// Back.
+	normal = glm::triangleNormal(bt[0], bt[1], bt[2]);
+	print_vec(bt[0]);
+	print_vec(bt[1]);
+	print_vec_named("bt_norm", normal);
+
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	// Right.
+	normal = glm::triangleNormal(rq[0][0], rq[0][1], rq[0][2]);
+	print_vec_named("rq0", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	normal = glm::triangleNormal(rq[1][0], rq[1][1], rq[1][2]);
+	print_vec_named("rq1", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	// Bottom.
+	normal = glm::triangleNormal(bq[0][0], bq[0][1], bq[0][2]);
+	print_vec_named("bq0", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	normal = glm::triangleNormal(bq[1][0], bq[1][1], bq[1][2]);
+	print_vec_named("bq1", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	// Left.
+	normal = glm::triangleNormal(lq[0][0], lq[0][1], lq[0][2]);
+	print_vec_named("lq0", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	normal = glm::triangleNormal(lq[1][0], lq[1][1], lq[1][2]);
+	print_vec_named("lq0", normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+	geom->normals.push_back(normal);
+
+	// TODO: these are incorrect.
 	const std::vector<glm::vec2> texcoords = {
-		// top right.
+		// Front.
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
 		glm::vec2(1.0f, 1.0f),
-		// bottom right.
+		// Back.
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
+		// Right.
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
+		// Bottom.
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
+		// Left.
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
 		glm::vec2(1.0f, 1.0f),
 	};
-
-	shared_data geom = make_shared<PSIGeometryData>();
-
-	glm::vec3 normal;
-	normal = glm::normalize(glm::cross(f[1] - f[0], f[2] - f[0]));
-	geom->normals.push_back(normal);
-	geom->normals.push_back(normal);
-	geom->normals.push_back(normal);
-
-	normal = glm::normalize(glm::cross(b[1] - b[0], b[2] - b[0]));
-	geom->normals.push_back(normal);
-	geom->normals.push_back(normal);
-	geom->normals.push_back(normal);
 
 	geom->positions = positions;
 	geom->indexes   = indexes;

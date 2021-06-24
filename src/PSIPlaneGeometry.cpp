@@ -122,8 +122,8 @@ shared_ptr<PSIGeometryData> uniform_plane(GLint rows, GLboolean repeat_texture) 
 			// Calculate the normals.
 			PSI::triangle t0 = {{ quad[0], quad[1], quad[2] }};
 			PSI::triangle t1 = {{ quad[0], quad[2], quad[3] }};
-			glm::vec3 tri0_normal = glm::normalize(glm::cross(t0.p[2] - t0.p[0], t0.p[1] - t0.p[0]));
-			glm::vec3 tri1_normal = glm::normalize(glm::cross(t1.p[2] - t1.p[0], t1.p[1] - t1.p[0]));
+			glm::vec3 tri0_normal = PSIMath::calc_tri_normal(t0);
+			glm::vec3 tri1_normal = PSIMath::calc_tri_normal(t1);
 
 			// We need one vertex normal for each vertex point.
 			data->normals.push_back(tri0_normal);
@@ -139,7 +139,7 @@ shared_ptr<PSIGeometryData> uniform_plane(GLint rows, GLboolean repeat_texture) 
 			 */
 
 			// Calculate vertex indexes.
-			vertex_offsets = PSIGeometry::Quad::get_quad_indexes(quad_index);
+			vertex_offsets = PSIGeometry::Quad::calc_quad_indexes(quad_index);
 			vertex_offset = 6 * quad_index;
 			data->indexes.insert(data->indexes.begin() + vertex_offset, vertex_offsets.begin(), vertex_offsets.end());
 
