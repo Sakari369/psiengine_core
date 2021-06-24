@@ -39,6 +39,14 @@ namespace PSI {
 	// Quad made out of two triangles.
 	struct quad {
 		PSI::triangle tri[2];
+
+		PSI::triangle& operator[] (int index) {
+			return tri[index];
+		}
+
+		const PSI::triangle& operator[] (int index) const {
+			return tri[index];
+		}
 	};
 
 	// Quad with four vertices.

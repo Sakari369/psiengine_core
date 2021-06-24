@@ -24,7 +24,7 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	plog_s("tri_verts[1] = %f.%f", tri_verts[1].x, tri_verts[1].y);
 	plog_s("tri_verts[2] = %f.%f", tri_verts[2].x, tri_verts[2].y);
 
-	// Vertex ordering.
+	// Vertex ordering for front and back faces making up the prism.
 	//
 	//      0
 	//      .
@@ -32,79 +32,73 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	//    /   \
 	//   /_____\
 	//  2       1
+	//
+	//  This matches when looking at the object from +Z to .. -Z direction.
+	//  Meaning the camera is pointing towards +Z, or towards the viewer.
 
 	// Front triangle face.
-	const PSI::triangle front = {
+	const PSI::triangle f = {
 		{ glm::vec3(tri_verts[0], -depth/2.0f), 
 		  glm::vec3(tri_verts[1], -depth/2.0f), 
 		  glm::vec3(tri_verts[2], -depth/2.0f) }
 	};
 
-	plog_s("front[0] = %f.%f.%f", front[0].x, front[0].y, front[0].z);
-	plog_s("front[1] = %f.%f.%f", front[1].x, front[1].y, front[1].z);
-	plog_s("front[2] = %f.%f.%f", front[2].x, front[2].y, front[2].z);
-
 	// Back triangle face.
-	const PSI::triangle back = {
+	const PSI::triangle b = {
 		{ glm::vec3(tri_verts[0], depth/2.0f), 
 		  glm::vec3(tri_verts[1], depth/2.0f), 
 		  glm::vec3(tri_verts[2], depth/2.0f) }
 	};
 
-	plog_s("back[0] = %f.%f.%f", back[0].x, back[0].y, back[0].z);
-	plog_s("back[1] = %f.%f.%f", back[1].x, back[1].y, back[1].z);
-	plog_s("back[2] = %f.%f.%f", back[2].x, back[2].y, back[2].z);
+	// Connect the triangle faces with quads on all three sides of the prism.
+	//
+	// We should be able to define these just as quads with 4 vertices.
 
-	// Right quad face 0. CW.
-	const PSI::triangle right0 = {
-		front[0], back[0], back[1]
+	// Right quad tri 0.
+	const PSI::triangle r0 = {
+		f[0], b[0], f[1]
+	};
+	// Right quad tri 1.
+	const PSI::triangle r1 = {
+		f[1], b[0], b[1]
 	};
 
-	plog_s("right0[0] = %f.%f.%f", right0[0].x, right0[0].y, right0[0].z);
-	plog_s("right0[1] = %f.%f.%f", right0[1].x, right0[1].y, right0[1].z);
-	plog_s("right0[2] = %f.%f.%f", right0[2].x, right0[2].y, right0[2].z);
-
-	// Right quad face 1. CW.
-	const PSI::triangle right1 = {
-		front[0], back[1], front[1]
+	// Bottom quad tri 0.
+	const PSI::triangle b0 = {
+		f[2], b[2], b[1]
+	};
+	// Bottom quad tri 1.
+	const PSI::triangle b1 = {
+		f[2], b[1], f[1]
 	};
 
-	plog_s("right1[0] = %f.%f.%f", right1[0].x, right1[0].y, right1[0].z);
-	plog_s("right1[1] = %f.%f.%f", right1[1].x, right1[1].y, right1[1].z);
-	plog_s("right1[2] = %f.%f.%f", right1[2].x, right1[2].y, right1[2].z);
-
-	const PSI::triangle left0 = {
-		front[0], back[0], back[2]
+	// Left quad tri 0.
+	const PSI::triangle l0 = {
+		f[0], b[2], f[2]
 	};
-	const PSI::triangle left1 = {
-		front[0], back[2], front[2]
-	};
-
-	const PSI::triangle bottom0 = {
-		front[2], back[1], front[1]
-	};
-	const PSI::triangle bottom1 = {
-		front[2], back[2], back[1]
+	// Left quad tri 1.
+	const PSI::triangle l1 = {
+		f[0], b[0], b[2]
 	};
 
 	// Do we need actually all the positions ?
 	const std::vector<glm::vec3> positions = {
 		// Front triangle, cw.
-		front[0], front[1], front[2],
+		f[0], f[1], f[2],
 		// Back triangle, ccw.
-		back[2], back[1], back[0],
+		b[2], b[1], b[0],
 		// Right upper, cw.
-		right0[0], right0[1], right0[2],
+		r0[0], r0[1], r0[2],
 		// Right lower, cw.
-		right1[0], right1[1], right1[2],
+		r1[0], r1[1], r1[2],
 		// Left upper, ccw.
-		left0[2], left0[1], left0[0],
+		l0[2], l0[1], l0[0],
 		// Left lower, ccw.
-		left1[2], left1[1], left1[0],
+		l1[2], l1[1], l1[0],
 		// Bottom upper, ccw.
-		bottom0[2], bottom0[1], bottom0[0],
+		b0[2], b0[1], b0[0],
 		// Bottom lower, ccw.
-		bottom1[2], bottom1[1], bottom1[0]
+		b1[2], b1[1], b1[0]
 	};
 
 	const std::vector<GLuint> indexes = {
@@ -135,12 +129,12 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	shared_data geom = make_shared<PSIGeometryData>();
 
 	glm::vec3 normal;
-	normal = glm::normalize(glm::cross(front.p[1] - front.p[0], front.p[2] - front.p[0]));
+	normal = glm::normalize(glm::cross(f[1] - f[0], f[2] - f[0]));
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
-	normal = glm::normalize(glm::cross(back.p[1] - back.p[0], back.p[2] - back.p[0]));
+	normal = glm::normalize(glm::cross(b[1] - b[0], b[2] - b[0]));
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
