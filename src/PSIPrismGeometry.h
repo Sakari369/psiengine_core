@@ -12,6 +12,7 @@ namespace PSIGeometry {
 	using shared_data = shared_ptr<PSIGeometryData>;
 
 	namespace Prism {
+		// Calculate a prism shape, with given radius and depth in z-axis direction.
 		shared_data prism(GLfloat radius, GLfloat depth);
 	}
 }

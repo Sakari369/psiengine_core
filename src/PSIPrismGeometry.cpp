@@ -3,11 +3,6 @@
 namespace PSIGeometry {
 namespace Prism {
 
-// Allright to generate a prism, we first need to:
-// Generate 1 triangle, translate that to depth amount.
-// Then generate 3 * 2 more triangles, 2 for each side of the prism.
-// We already have some code for this in the gdscript generating the miter joins.
-
 shared_data prism(GLfloat radius, GLfloat depth) {
 	assert(radius >= 0.0f);
 	assert(depth >= 0.0f);
@@ -92,13 +87,10 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	geom->indexes = {
 		0, 1, 2,
 		3, 4, 5,
-
 		6, 7, 8,
 		9, 10, 11,
-
 		12, 13, 14,
 		15, 16, 17,
-
 		18, 19, 20,
 		21, 22, 23 
 	};
