@@ -20,10 +20,6 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		PSIMath::calc_poly_vertex(3, radius, angle, 2)
 	};
 
-	plog_s("tri_verts[0] = %f.%f", tri_verts[0].x, tri_verts[0].y);
-	plog_s("tri_verts[1] = %f.%f", tri_verts[1].x, tri_verts[1].y);
-	plog_s("tri_verts[2] = %f.%f", tri_verts[2].x, tri_verts[2].y);
-
 	// Vertex ordering for front and back faces making up the prism.
 	//
 	//      0
@@ -70,22 +66,20 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		{ ft[0], bt[0], bt[2] }
 	}};
 
+	// Form the actual position data sent to the GPU from the face data.
 	const std::vector<glm::vec3> positions = {
 		// Front triangle, cw.
 		ft[0], ft[1], ft[2],
 		// Back triangle, ccw.
 		bt[2], bt[1], bt[0],
-
 		// Right upper, cw.
 		rq[0][0], rq[0][1], rq[0][2],
 		// Right lower, cw.
 		rq[1][0], rq[1][1], rq[1][2],
-
 		// Bottom upper, ccw.
 		bq[0][2], bq[0][1], bq[0][0],
 		// Bottom lower, ccw.
 		bq[1][2], bq[1][1], bq[1][0],
-
 		// Left upper, ccw.
 		lq[0][2], lq[0][1], lq[0][0],
 		// Left lower, ccw.
@@ -107,64 +101,46 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	};
 
 	shared_data geom = make_shared<PSIGeometryData>();
-	
+
+	// Calculate normals from the position data.
+	//
 	// Front.
 	glm::vec3 normal;
-	//normal = PSIMath::calc_tri_normal(ft);
-	normal = glm::triangleNormal(ft[0], ft[1], ft[2]);
-	print_vec(ft[0]);
-	print_vec(ft[1]);
-	print_vec_named("ft_norm", normal);
 
+	normal = glm::triangleNormal(positions[0], positions[1], positions[2]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Back.
-	normal = glm::triangleNormal(bt[0], bt[1], bt[2]);
-	print_vec(bt[0]);
-	print_vec(bt[1]);
-	print_vec_named("bt_norm", normal);
-
+	normal = glm::triangleNormal(positions[3], positions[4], positions[5]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Right.
-	normal = glm::triangleNormal(rq[0][0], rq[0][1], rq[0][2]);
-	print_vec_named("rq0", normal);
+	normal = glm::triangleNormal(positions[6], positions[7], positions[8]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
-
-	normal = glm::triangleNormal(rq[1][0], rq[1][1], rq[1][2]);
-	print_vec_named("rq1", normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Bottom.
-	normal = glm::triangleNormal(bq[0][0], bq[0][1], bq[0][2]);
-	print_vec_named("bq0", normal);
+	normal = glm::triangleNormal(positions[12], positions[13], positions[14]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
-
-	normal = glm::triangleNormal(bq[1][0], bq[1][1], bq[1][2]);
-	print_vec_named("bq1", normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Left.
-	normal = glm::triangleNormal(lq[0][0], lq[0][1], lq[0][2]);
-	print_vec_named("lq0", normal);
+	normal = glm::triangleNormal(positions[18], positions[19], positions[20]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
-
-	normal = glm::triangleNormal(lq[1][0], lq[1][1], lq[1][2]);
-	print_vec_named("lq0", normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);

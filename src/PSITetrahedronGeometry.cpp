@@ -20,10 +20,10 @@ namespace PSIGeometry {
 		};
 
 		const std::vector<glm::vec3> positions = {
-			faces[0].p[0], faces[0].p[1], faces[0].p[2], // front right.
-			faces[1].p[0], faces[1].p[1], faces[1].p[2], // front left.
-			faces[2].p[0], faces[2].p[1], faces[2].p[2], // back.
-			faces[3].p[0], faces[3].p[1], faces[3].p[2], // bottom.
+			faces[0][0], faces[0][1], faces[0][2], // front right.
+			faces[1][0], faces[1][1], faces[1][2], // front left.
+			faces[2][0], faces[2][1], faces[2][2], // back.
+			faces[3][0], faces[3][1], faces[3][2], // bottom.
 		};
 
 		const std::vector<GLuint> indexes = {
