@@ -66,8 +66,10 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		{ ft[0], bt[0], bt[2] }
 	}};
 
+	shared_data geom = make_shared<PSIGeometryData>();
+
 	// Form the actual position data sent to the GPU from the face data.
-	const std::vector<glm::vec3> positions = {
+	geom->positions = {
 		// Front triangle, cw.
 		ft[0], ft[1], ft[2],
 		// Back triangle, ccw.
@@ -86,7 +88,8 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		lq[1][2], lq[1][1], lq[1][0],
 	};
 
-	const std::vector<GLuint> indexes = {
+	// Indexes for each position.
+	geom->indexes = {
 		0, 1, 2,
 		3, 4, 5,
 
@@ -100,35 +103,35 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		21, 22, 23 
 	};
 
-	shared_data geom = make_shared<PSIGeometryData>();
-
 	// Calculate normals from the position data.
-	//
-	// Front.
+	geom->normals.reserve(geom->positions.size());
 	glm::vec3 normal;
 
-	normal = glm::triangleNormal(positions[0], positions[1], positions[2]);
+	// Front.
+	normal = glm::triangleNormal(geom->positions[0], geom->positions[1], geom->positions[2]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Back.
-	normal = glm::triangleNormal(positions[3], positions[4], positions[5]);
+	normal = glm::triangleNormal(geom->positions[3], geom->positions[4], geom->positions[5]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Right.
-	normal = glm::triangleNormal(positions[6], positions[7], positions[8]);
+	normal = glm::triangleNormal(geom->positions[6], geom->positions[7], geom->positions[8]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
+	// We can use same normal for second triangle on these quad faces, it is facing in the same direction.
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 
 	// Bottom.
-	normal = glm::triangleNormal(positions[12], positions[13], positions[14]);
+	// Skip the position indexes for the second triangle on each quad face as the normal is the same.
+	normal = glm::triangleNormal(geom->positions[12], geom->positions[13], geom->positions[14]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
@@ -137,7 +140,7 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	geom->normals.push_back(normal);
 
 	// Left.
-	normal = glm::triangleNormal(positions[18], positions[19], positions[20]);
+	normal = glm::triangleNormal(geom->positions[18], geom->positions[19], geom->positions[20]);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
 	geom->normals.push_back(normal);
@@ -146,7 +149,7 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 	geom->normals.push_back(normal);
 
 	// TODO: these are incorrect.
-	const std::vector<glm::vec2> texcoords = {
+	geom->texcoords = {
 		// Front.
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
@@ -159,7 +162,13 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
 		glm::vec2(1.0f, 1.0f),
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
 		// Bottom.
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
 		glm::vec2(1.0f, 1.0f),
@@ -167,11 +176,11 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		glm::vec2(0.0f, 0.0f),
 		glm::vec2(0.0f, 1.0f),
 		glm::vec2(1.0f, 1.0f),
+		glm::vec2(0.0f, 0.0f),
+		glm::vec2(0.0f, 1.0f),
+		glm::vec2(1.0f, 1.0f),
 	};
 
-	geom->positions = positions;
-	geom->indexes   = indexes;
-	geom->texcoords = texcoords;
 
 	return geom;
 }
