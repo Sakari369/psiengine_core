@@ -117,6 +117,11 @@ class PSIRenderObj {
 			return _render_asset.material->get_shader();
 		}
 
+		void set_draw_mode(GLuint draw_mode) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_draw_mode(draw_mode);
+		}
+
 		void set_transform(PSIGLTransform transform) {
 			_render_asset.transform = transform;
 		}

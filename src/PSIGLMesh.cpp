@@ -70,8 +70,8 @@ void PSIGLMesh::draw() {
 }
 
 void PSIGLMesh::draw_indexed() {
-	//plog("vao = %d _buffer_name_ids[BufferName::INDEX] = %d _draw_mode = %d _draw_count = %d", 
-//		_vao, _buffer_name_ids[BufferName::INDEX], _draw_mode, _draw_count);
+	plog("vao = %d _buffer_name_ids[BufferName::INDEX] = %d _draw_mode = %d _draw_count = %d", 
+		_vao, _buffer_name_ids[BufferName::INDEX], _draw_mode, _draw_count);
 	// We do not need to bind the buffers, as the buffer has already been bound in the vertex state
 	// when we enable vertexAttribPointer.
 	glBindVertexArray(_vao);
