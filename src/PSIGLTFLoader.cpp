@@ -2,11 +2,11 @@
 
 #define BUFFER_OFFSET(i) ((char *)NULL + (i))
 
-shared_ptr<PSIGLMesh> PSIGLTFLoader::create_gl_mesh(const shared_ptr<PSIGLShader> &shader, const tinygltf::Scene &scene) {
+GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, const tinygltf::Scene &scene) {
 	psilog(PSILog::OPENGL, "Creating mesh from glTF scene");
 
 	// Create new mesh object.
-	shared_ptr<PSIGLMesh> mesh_obj = make_shared<PSIGLMesh>();
+	GLMeshSharedPtr mesh_obj = PSIGLMesh::create();
 	mesh_obj->gen_vao();
 	mesh_obj->bind_vao();
 
@@ -180,7 +180,7 @@ static std::string get_path_ext(const std::string &path) {
 	return "";
 }
 
-shared_ptr<PSIGLMesh> PSIGLTFLoader::load_gl_mesh(const shared_ptr<PSIGLShader> &shader, std::string scene_path) {
+GLMeshSharedPtr PSIGLTFLoader::load_gl_mesh(const ShaderSharedPtr &shader, std::string scene_path) {
 	tinygltf::Scene scene;
 	tinygltf::TinyGLTFLoader loader;
 
@@ -213,7 +213,7 @@ shared_ptr<PSIGLMesh> PSIGLTFLoader::load_gl_mesh(const shared_ptr<PSIGLShader> 
 	*/
 
 	assert(shader != nullptr);
-	shared_ptr<PSIGLMesh> mesh = create_gl_mesh(shader, scene);
+	GLMeshSharedPtr mesh = create_gl_mesh(shader, scene);
 
 	return mesh;
 }

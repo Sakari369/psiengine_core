@@ -17,11 +17,18 @@
 #include "ext/freetype-gl/freetype-gl.h"
 #include "ext/freetype-gl/texture-font.h"
 
+class PSIFontAtlas;
+typedef shared_ptr<PSIFontAtlas> FontAtlasSharedPtr;
+
 class PSIFontAtlas {
 	public:
 		PSIFontAtlas() = default;
 		~PSIFontAtlas() {
 			delete_font();
+		}
+		
+		static FontAtlasSharedPtr create() {
+			return make_shared<PSIFontAtlas>();
 		}
 
 		// Initialize font atlas from loaded font.
@@ -95,17 +102,23 @@ class PSIFontAtlas {
 		texture_atlas_t *create_atlas(GLsizei width, GLsizei height);
 };
 
+class PSITextRenderer;
+typedef shared_ptr<PSITextRenderer> TextRendererSharedPtr;
+
 class PSITextRenderer : public PSIRenderObj {
-	using shared_data = shared_ptr<PSIGeometryData>;
 	using unique_data = unique_ptr<PSIGeometryData>;
 
 	public:
 		PSITextRenderer() = default;
 		~PSITextRenderer() = default;
 
+		static TextRendererSharedPtr create() {
+			return make_shared<PSITextRenderer>();
+		}
+
 		GLboolean init();
 
-		void draw(const shared_ptr<PSIRenderContext> &ctx);
+		void draw(const RenderContextSharedPtr &ctx);
 
 		void set_text(std::string text);
 		std::string get_text() {
@@ -129,17 +142,17 @@ class PSITextRenderer : public PSIRenderObj {
 			return _glyph_dimensions.at(idx);
 		}
 
-		shared_ptr<PSIFontAtlas> get_font_atlas() {
+		FontAtlasSharedPtr get_font_atlas() {
 			return _font_atlas;
 		}
 
-		void set_font_atlas(shared_ptr<PSIFontAtlas> font_atlas) {
+		void set_font_atlas(FontAtlasSharedPtr font_atlas) {
 			_font_atlas = font_atlas;
 		}
 
 	private:
 		// The font data this text is using.
-		shared_ptr<PSIFontAtlas> _font_atlas;
+		FontAtlasSharedPtr _font_atlas;
 
 		// Dimensions of the currently baked text.
 		glm::vec2 _dimensions = glm::vec2(0.0f, 0.0f);
@@ -157,7 +170,7 @@ class PSITextRenderer : public PSIRenderObj {
 		GLuint _draw_count = -1;
 
 		// Bake current text into a mesh.
-		unique_data bake_text(const shared_ptr<PSIFontAtlas> &atlas, std::string text);
+		unique_data bake_text(const FontAtlasSharedPtr &atlas, std::string text);
 		// Update current text mesh.
 		void update_mesh();
 };

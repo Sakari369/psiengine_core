@@ -14,6 +14,6 @@
 namespace PSIGeometry {
 	// Register this directly in the PSIGeometry namespace
 	// so we can call it by PSIGeometry::sphere()
-	shared_ptr<PSIGeometryData> sphere(GLfloat radius, GLint widthSegments, GLint heightSegments);
+	GeometryDataSharedPtr sphere(GLfloat radius, GLint widthSegments, GLint heightSegments);
 					   //GLfloat phiStart, GLfloat phiLength, GLfloat thetaStart, GLfloat thetaLength);
 }

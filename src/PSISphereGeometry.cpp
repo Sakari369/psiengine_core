@@ -2,9 +2,9 @@
 
 namespace PSIGeometry {
 
-shared_ptr<PSIGeometryData> sphere(GLfloat radius, GLint widthSegments, GLint heightSegments) {
+GeometryDataSharedPtr sphere(GLfloat radius, GLint widthSegments, GLint heightSegments) {
 
-	shared_ptr<PSIGeometryData> geom = make_shared<PSIGeometryData>();
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 
 	plog_s("creating sphere!, radius = %f widthSegments = %d heightSegments = %d", radius, widthSegments, heightSegments);
 

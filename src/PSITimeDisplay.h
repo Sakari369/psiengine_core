@@ -17,13 +17,13 @@ class PSITimeDisplay {
 		PSITimeDisplay() = default;
 		~PSITimeDisplay() = default;
 
-		void set_shader(shared_ptr<PSIGLShader> shader);
+		void set_shader(ShaderSharedPtr shader);
 		void set_atlas(texture_atlas_t *atlas);
 
 		GLboolean init();
 
 		void logic(GLfloat frameTimeMs);
-		void draw(const shared_ptr<PSIRenderContext> &ctx);
+		void draw(const RenderContextSharedPtr &ctx);
 
 	private:
 		static const std::string NUMBER_STR;

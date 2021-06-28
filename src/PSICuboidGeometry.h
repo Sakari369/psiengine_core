@@ -9,9 +9,7 @@
 #include <algorithm>
 
 namespace PSIGeometry {
-	using shared_data = shared_ptr<PSIGeometryData>;
-
 	namespace Cuboid {
-		shared_data cuboid(GLfloat width, GLfloat height, GLfloat depth);
+		GeometryDataSharedPtr cuboid(GLfloat width, GLfloat height, GLfloat depth);
 	}
 }

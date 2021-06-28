@@ -65,7 +65,7 @@ void PSITimeDisplay::logic(GLfloat frameTimeMs) {
 	_remainder = time_delta;
 }
 
-void PSITimeDisplay::draw(const shared_ptr<PSIRenderContext> &ctx) {
+void PSITimeDisplay::draw(const RenderContextSharedPtr &ctx) {
 	GLint char_idx;
 	GLint sep_idx;
 	GLfloat glyph_width;

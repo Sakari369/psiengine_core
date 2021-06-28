@@ -11,10 +11,17 @@
 
 #include <cmath>
 
+class PSICamera;
+typedef shared_ptr<PSICamera> CameraSharedPtr;
+
 class PSICamera {
 	public:
 		PSICamera() = default;
 		~PSICamera() = default;
+
+		static CameraSharedPtr create() {
+			return make_shared<PSICamera>();
+		}
 
 		// Default far plane value.
 		static const GLfloat DEF_FAR_PLANE;

@@ -9,10 +9,8 @@
 #include <algorithm>
 
 namespace PSIGeometry {
-	using shared_data = shared_ptr<PSIGeometryData>;
-
 	namespace Icosahedron {
 		// Create icosahedron with levels of recursion.
-		shared_data icosahedron(GLint recursion);
+		GeometryDataSharedPtr icosahedron(GLint recursion);
 	}
 }

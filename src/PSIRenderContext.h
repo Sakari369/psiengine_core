@@ -9,11 +9,18 @@
 #include "PSICamera.h"
 #include "PSILight.h"
 
+class PSIRenderContext;
+typedef shared_ptr<PSIRenderContext> RenderContextSharedPtr;
+
 class PSIRenderContext {
 	private:
 	public:
 		PSIRenderContext() = default;
 		~PSIRenderContext() = default;
+
+		static RenderContextSharedPtr create() {
+			return make_shared<PSIRenderContext>();
+		}
 
 		// Elapsed time since the beginning of this context 
 		GLfloat elapsed_time = 0.0f;
@@ -49,7 +56,7 @@ class PSIRenderContext {
 		std::stack<glm::mat4> projection;
 
 		// The camera view into the world
-		shared_ptr<PSICamera> camera_view;
+		CameraSharedPtr camera_view;
 		// Ambient light
-		std::vector<shared_ptr<PSILight>> lights;
+		std::vector<LightSharedPtr> lights;
 };

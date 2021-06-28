@@ -1,6 +1,7 @@
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS deployment target" FORCE)
 project (psicore)
-#set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Debug)
 
 cmake_minimum_required (VERSION 3.2)
 set(PSI_ARCH "macos_x64")
@@ -11,11 +12,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
 
-add_compile_options(-Wall -std=c++14 -fno-exceptions)
-set(CMAKE_CXX_FLAGS_RELEASE "-Os -ffast-math")
+add_compile_options(-Wall -std=c++14 -Wno-deprecated)
+set(CMAKE_CXX_FLAGS_RELEASE "-Os -ffast-math -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "-Og")
 
-message("CMAKE_CXX_FLAGS is ${CMAKE_CXX_FLAGS}")
+message("CMAKE_BUILD_TYPE is ${CMAKE_BUILD_TYPE}")
 message("CMAKE_CXX_FLAGS_DEBUG is ${CMAKE_CXX_FLAGS_DEBUG}")
 message("CMAKE_CXX_FLAGS_RELEASE is ${CMAKE_CXX_FLAGS_RELEASE}")
 
@@ -54,7 +55,6 @@ set(SOURCES
 	src/PSIColor.cpp 
 	src/PSIString.cpp 
 	src/PSICamera.cpp 
-	src/PSIUniformMap.cpp 
 	src/PSIGLMesh.cpp 
 	src/PSIGLRenderer.cpp 
 	src/PSIQuadGeometry.cpp 
@@ -97,7 +97,6 @@ set(HEADER_FILES,
 	src/PSIColor.h 
 	src/PSIString.h 
 	src/PSICamera.h 
-	src/PSIUniformMap.h 
 	src/PSIGLMesh.h 
 	src/PSIGLRenderer.h 
 	src/PSIQuadGeometry.h 

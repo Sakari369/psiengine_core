@@ -1,10 +1,10 @@
 #include "PSIResourceManager.h"
 
-shared_ptr<PSIGLShader> PSIResourceManager::load_shader(std::string name,
+ShaderSharedPtr PSIResourceManager::load_shader(std::string name,
                                                         std::string vert_shader_path,
                                                         std::string frag_shader_path,
                                                         std::string geom_shader_path) {
-	auto shader = make_shared<PSIGLShader>();
+	auto shader = PSIGLShader::create();
 	if (shader != nullptr) {
 		shader->set_name(name);
 

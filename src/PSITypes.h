@@ -7,12 +7,14 @@
 #include <string>
 #include <memory>
 #include <type_traits>
+#include <vector>
 
 using std::unique_ptr;
 using std::shared_ptr;
 using std::move;
 using std::make_shared;
 using std::make_unique;
+using std::vector;
 
 // Needed together with enum classes
 struct EnumClassHash {

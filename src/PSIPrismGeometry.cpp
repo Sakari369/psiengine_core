@@ -3,7 +3,7 @@
 namespace PSIGeometry {
 namespace Prism {
 
-shared_data prism(GLfloat radius, GLfloat depth) {
+GeometryDataSharedPtr prism(GLfloat radius, GLfloat depth) {
 	assert(radius >= 0.0f);
 	assert(depth >= 0.0f);
 
@@ -61,7 +61,7 @@ shared_data prism(GLfloat radius, GLfloat depth) {
 		{ ft[0], bt[0], bt[2] }
 	}};
 
-	shared_data geom = make_shared<PSIGeometryData>();
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 
 	// Form the actual position data sent to the GPU from the face data.
 	geom->positions = {

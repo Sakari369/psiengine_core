@@ -24,22 +24,19 @@
 #include "PSIPrismGeometry.h"
 
 namespace PSIGeometry {
-	// Shared geometry data type.
-	using SharedGeometryData = shared_ptr<PSIGeometryData>;
-
 	// Functions for creating geometry primitive data.
-	SharedGeometryData cube();
-	SharedGeometryData cube_tetrahedron();
-	SharedGeometryData tetrahedron();
-	SharedGeometryData prism(GLfloat radius, GLfloat depth);
-	SharedGeometryData cube_inverted();
-	SharedGeometryData cuboid(GLfloat width, GLfloat height, GLfloat depth);
-	SharedGeometryData plane(GLint rows, GLboolean repeat_texture);
-	SharedGeometryData icosahedron(GLint recursion);
+	GeometryDataSharedPtr cube();
+	GeometryDataSharedPtr cube_tetrahedron();
+	GeometryDataSharedPtr tetrahedron();
+	GeometryDataSharedPtr prism(GLfloat radius, GLfloat depth);
+	GeometryDataSharedPtr cube_inverted();
+	GeometryDataSharedPtr cuboid(GLfloat width, GLfloat height, GLfloat depth);
+	GeometryDataSharedPtr plane(GLint rows, GLboolean repeat_texture);
+	GeometryDataSharedPtr icosahedron(GLint recursion);
 
 	std::array<glm::vec3, 4> quad(glm::vec2 origin, glm::vec2 radius);
 	std::vector<glm::vec3> create_poly(GLint num_points, GLfloat angle_offset, GLfloat radius);
 
 	// Add default opengl buffer values to shared geometry data.
-	void add_buffer_defaults(const SharedGeometryData &geom);
+	void add_buffer_defaults(const GeometryDataSharedPtr &geom);
 } // PSIGeometry

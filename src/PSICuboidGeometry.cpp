@@ -4,7 +4,7 @@
 namespace PSIGeometry {
 namespace Cuboid {
 
-shared_data cuboid(GLfloat width, GLfloat height, GLfloat depth) {
+GeometryDataSharedPtr cuboid(GLfloat width, GLfloat height, GLfloat depth) {
 	assert(width >= 0.0f);
 	assert(height >= 0.0f);
 	assert(depth >= 0.0f);
@@ -53,7 +53,7 @@ shared_data cuboid(GLfloat width, GLfloat height, GLfloat depth) {
 		cf[5].p[0], cf[5].p[1], cf[5].p[2], cf[5].p[3], // top.
 	};
 
-	shared_data geom = make_shared<PSIGeometryData>();
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 	if (geom == nullptr) {
 		return nullptr;
 	}

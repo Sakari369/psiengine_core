@@ -14,8 +14,10 @@
 #include "PSIGLTransform.h"
 #include "PSIRenderContext.h"
 #include "PSIGeometryData.h"
-#include "PSIUniformMap.h"
 #include "PSIAABB.h"
+
+class PSIRenderObj;
+typedef shared_ptr<PSIRenderObj> RenderObjSharedPtr;
 
 class PSIRenderObj {
 	public:
@@ -32,9 +34,9 @@ class PSIRenderObj {
 		// Represents one asset in our GL rendering space.
 		struct render_asset {
 			// Mesh for the asset.
-			shared_ptr<PSIGLMesh> mesh;
+			GLMeshSharedPtr mesh;
 			// Material.
-			shared_ptr<PSIGLMaterial> material;
+			GLMaterialSharedPtr material;
 			// Transformation.
 			PSIGLTransform transform;
 			// Physics transformation.
@@ -59,26 +61,26 @@ class PSIRenderObj {
 			MODULES_ELAPSED_TIME = 1
 		};
 
+		// Static creation method.
+		static RenderObjSharedPtr create() {
+			return make_shared<PSIRenderObj>();
+		}
+
 		PSIRenderObj();
 		virtual ~PSIRenderObj() = default;
 
 		// Copy constructor.
 		PSIRenderObj(const PSIRenderObj &rhs);
 
-		// Uniform mapper for storing different types of uniform values.
-		// This is public, so we can add new uniforms easily.
-		unique_ptr<PSIUniformMap> uniforms;
-
 		// Virtual methods for render obj.
 		// Classes extending renderobj can implement these methods to have custom drawing and logic.
-
 		// Logic is empty by default, implemented by the class extending.
-		virtual void logic(const shared_ptr<PSIRenderContext> &ctx) {
+		virtual void logic(const RenderContextSharedPtr &ctx) {
 			return;
 		}
 
 		// Default implementation for drawing render obj. 
-		virtual void draw(const shared_ptr<PSIRenderContext> &ctx);
+		virtual void draw(const RenderContextSharedPtr &ctx);
 
 		// Empty default initialization method.
 		virtual GLboolean init() {
@@ -91,20 +93,15 @@ class PSIRenderObj {
 			std::cout << "PSIRenderObj" << std::endl;
 		}
 
-		// Setup shader uniforms for lights.
-		void setup_lights(const shared_ptr<PSIGLShader> &shader,
-		                  const shared_ptr<PSIRenderContext> &ctx,
-		                  render_asset &inst);
-
 		// Init all geometry data buffers for this render obj.
-		void init_buffers(const shared_ptr<PSIGLMesh> &mesh, const shared_ptr<PSIGeometryData> &gpu_data);
+		void init_buffers(const GLMeshSharedPtr &mesh, const GeometryDataSharedPtr &gpu_data);
 		// Set all shader uniform values.
 		void set_shader_uniforms();
 		// Create GLMesh from gpu data.
-		shared_ptr<PSIGLMesh> create_gl_mesh(const shared_ptr<PSIGeometryData> &gpu_data);
+		GLMeshSharedPtr create_gl_mesh(const GeometryDataSharedPtr &gpu_data);
 
 		// Calculate transformation matrices.
-		void calc_model_view_projection(const shared_ptr<PSIRenderContext> &ctx,
+		void calc_model_view_projection(const RenderContextSharedPtr &ctx,
 		                                PSIGLTransform &transform);
 
 		// Common methods shared between instances of PSIRenderObj.
@@ -113,7 +110,8 @@ class PSIRenderObj {
 			_render_asset.mesh->draw_indexed();
 		}
 
-		shared_ptr<PSIGLShader> get_shader() {
+		ShaderSharedPtr get_shader() {
+			assert(_render_asset.material != nullptr);
 			return _render_asset.material->get_shader();
 		}
 
@@ -152,22 +150,22 @@ class PSIRenderObj {
 			_modules = modules;
 		}
 
-		void set_geometry_data(const shared_ptr<PSIGeometryData> &geometry_data) {
+		void set_geometry_data(const GeometryDataSharedPtr &geometry_data) {
 			_geometry_data = geometry_data;
 		}
-		shared_ptr<PSIGeometryData> get_geometry_data() {
+		GeometryDataSharedPtr get_geometry_data() {
 			return _geometry_data;
 		}
 
 		// These are our children render objs, and are rendered and handled as a group when rendered.
 		// TODO: Transformations, scaling and rotation should probably apply too.
-		void add_child(shared_ptr<PSIRenderObj> child) {
+		void add_child(RenderObjSharedPtr child) {
 			_children.push_back(child);
 		}
-		shared_ptr<PSIRenderObj> get_child(GLuint index) {
+		RenderObjSharedPtr get_child(GLuint index) {
 			return _children.at(index);
 		}
-		std::vector<shared_ptr<PSIRenderObj>> get_children() {
+		std::vector<RenderObjSharedPtr> get_children() {
 			return _children;
 		}
 		GLboolean has_children() {
@@ -189,10 +187,10 @@ class PSIRenderObj {
 			return (_sort_index_set == true) ? _sort_index : _render_asset.transform.get_translation().z;
 		}
 
-		void set_gl_mesh(shared_ptr<PSIGLMesh> &mesh) {
+		void set_gl_mesh(GLMeshSharedPtr &mesh) {
 			_render_asset.mesh = mesh;
 		}
-		shared_ptr<PSIGLMesh> get_gl_mesh() {
+		GLMeshSharedPtr get_gl_mesh() {
 			return _render_asset.mesh;
 		}
 
@@ -242,10 +240,10 @@ class PSIRenderObj {
 			_physics_body.force += force;
 		}
 
-		void set_material(shared_ptr<PSIGLMaterial> material) {
+		void set_material(GLMaterialSharedPtr material) {
 			_render_asset.material = material;
 		}
-		shared_ptr<PSIGLMaterial> get_material() {
+		GLMaterialSharedPtr get_material() {
 			return _render_asset.material;
 		}
 
@@ -284,12 +282,12 @@ class PSIRenderObj {
 		// The render asset for this render obj.
 		PSIRenderObj::render_asset _render_asset;
 		// Geometry data for this render obj.
-		shared_ptr<PSIGeometryData> _geometry_data;
+		GeometryDataSharedPtr _geometry_data;
 		// Physics body for this render obj.
 		PSIRenderObj::physics_body _physics_body;
 
 		// Child render objs for this render obj.
-		std::vector<shared_ptr<PSIRenderObj>> _children;
+		std::vector<RenderObjSharedPtr> _children;
 
 		// Should this object be tested for depth ?
 		GLboolean _depth_tested = true;

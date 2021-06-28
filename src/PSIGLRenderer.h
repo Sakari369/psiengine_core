@@ -35,13 +35,16 @@ class PSIGLRenderer {
 		GLint init();
 		void shutdown();
 
-		void render(const shared_ptr<PSIRenderScene> &scene,
-			       const shared_ptr<PSIRenderContext> &ctx, 
-			       const shared_ptr<PSICamera> &camera);
+		void render(const RenderSceneSharedPtr &scene,
+			       const RenderContextSharedPtr &ctx, 
+			       const CameraSharedPtr &camera);
 
-		void draw_render_objs(const shared_ptr<PSIRenderScene> &scene,
-		                      const shared_ptr<PSIRenderContext> &ctx,
-		                      const shared_ptr<PSICamera> &camera);
+		void draw_render_objs(const RenderSceneSharedPtr &scene,
+		                      const RenderContextSharedPtr &ctx,
+		                      const CameraSharedPtr &camera);
+
+		// Setup shader uniforms for lights.
+		void setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx);
 
 		GLint cycle_draw_mode();
 		GLint set_draw_mode(GLint draw_mode);
@@ -58,25 +61,25 @@ class PSIGLRenderer {
 		void set_wireframe(GLboolean wireframe) {
 			_wireframe = wireframe;
 		}
-		shared_ptr<PSIRenderContext> get_context() {
+		RenderContextSharedPtr get_context() {
 			return _ctx;
 		}
 
 	private:
-		// Current drawing context. Contains all the context variables that we need to pass around
-		// while rendering.
-		shared_ptr<PSIRenderContext> _ctx;
+		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
+		RenderContextSharedPtr _ctx;
 
+		// Draw mode sets wireframe and blending together.
 		GLint _draw_mode = DrawMode::SHADED;
+		// What face side are we culling, or none.
 		GLint _cull_mode = CullMode::BACK;
 
-		// Options.
+		// Enable GL_BLEND ?
 		bool _blending_enabled = true;
 		// Render object as wireframe ?
 		bool _wireframe = false;
 		// Depth sort render objects ?
 		bool _sorting = true;
-
 		// Current MSAA level.
 		GLfloat _msaa_samples = PSIVideo::DEF_MSAA_SAMPLES;
 };

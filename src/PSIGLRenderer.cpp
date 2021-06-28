@@ -1,15 +1,44 @@
 #include "PSIGLRenderer.h"
 
-#define WIREFRAME_SUPPORT true
-
 void PSIGLRenderer::shutdown() {
 	glDeleteFramebuffers(1, &_ctx->main_fbo);
 	glDeleteFramebuffers(1, &_ctx->msaa_fbo);
 }
 
+void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx) {
+	GLint light_index = 0;
+	for (auto light : ctx->lights) {
+		PSILight::LightType type = light->get_type();
+		// We don't need the opacity for the light color.
+		glm::vec3 light_color = glm::vec3(light->get_color());
+
+		switch (type) {
+			case PSILight::LightType::AMBIENT:
+				// Usually we only have one ambient light, so just override.
+				shader->set_uniform("u_ambient.color", light_color);
+				shader->set_uniform("u_ambient.intensity", light->get_intensity());
+				break;
+
+			case PSILight::LightType::DIRECTIONAL: {
+				shader->set_uniform("u_light.pos", light->get_pos());
+				shader->set_uniform("u_light.color", light_color);
+				shader->set_uniform("u_light.intensity", light->get_intensity());
+				shader->set_uniform("u_light.dir", light->get_dir());
+				break;
+			}
+
+			case PSILight::LightType::POINT: {
+				break;
+			}
+		}
+
+		light_index++;
+	}
+}
+
 GLint PSIGLRenderer::init() {
 	// Create our rendering context.
-	_ctx = make_shared<PSIRenderContext>();
+	_ctx = PSIRenderContext::create();
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
@@ -41,11 +70,11 @@ GLint PSIGLRenderer::init() {
 }
 
 // Render all of our renderable objects.
-void PSIGLRenderer::draw_render_objs(const shared_ptr<PSIRenderScene> &scene,
-                                     const shared_ptr<PSIRenderContext> &ctx,
-                                     const shared_ptr<PSICamera> &camera) {
-	std::vector<shared_ptr<PSIRenderObj>> render_objs = scene->get_render_objs();
-	if (render_objs.empty()) {
+// TODO: rename to update_and_draw_render_objs() ?
+void PSIGLRenderer::draw_render_objs(const RenderSceneSharedPtr &scene,
+                                     const RenderContextSharedPtr &ctx,
+                                     const CameraSharedPtr &camera) {
+	if (scene->m_render_objs.empty() == true) {
 		return;
 	}
 
@@ -53,32 +82,43 @@ void PSIGLRenderer::draw_render_objs(const shared_ptr<PSIRenderScene> &scene,
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
-
-#ifdef WIREFRAME_SUPPORT
 	if (_wireframe) {
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	}
-#endif
-	//psilog(PSILog::FREQ, "Rendering scene");
 
 	STACK_PUSH(ctx->view);
 		// Look at where the camera view is looking at.
-		// This can be disabled per object with obj->get_is_camera_translated().
+		// This can be disabled per object with obj->set_is_camera_translated().
 		ctx->view.top() = ctx->view.top() * camera->get_looking_at_matrix();
 		// Store the camera in our context.
 		// This way the objects have access to it via the context.
 		ctx->camera_view = camera;
 
 		// Sort our scene objects.
-		if (_sorting) {
+		if (_sorting == true) {
 			scene->sort();
 		}
 
-		// Setup lightning.
-		ctx->lights = scene->get_lights();
+		ShaderSharedPtr previous_shader = nullptr;
+		for (const auto &obj : scene->m_render_objs) {
+			ShaderSharedPtr shader = obj->get_shader();
+			assert(shader != nullptr);
 
-		// Draw the objects in our scene.
-		for (auto const &obj : render_objs) {
+			// Don't change shader, if shader has not changed.
+			if (shader != previous_shader) {
+				shader->use_program();
+
+				// Setup scene lightning.
+				ctx->lights = scene->get_lights();
+				setup_lights(shader, ctx);
+
+				// Set shader uniforms.
+				shader->set_uniform("u_elapsed_time", ctx->elapsed_time);
+
+				previous_shader = shader;
+			}
+
+			// We run logic here also, so we don't have to loop the objects twice per frame.
 			obj->logic(ctx);
 			if (obj->is_visible()) {
 				obj->draw(ctx);
@@ -88,19 +128,17 @@ void PSIGLRenderer::draw_render_objs(const shared_ptr<PSIRenderScene> &scene,
 
 	//psilog(PSILog::FREQ, "Scene rendered");
 
-#ifdef WIREFRAME_SUPPORT
-	if (_wireframe) {
+	if (_wireframe == true) {
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	}
-#endif
-	if (_blending_enabled) {
+	if (_blending_enabled == true) {
 		glDisable(GL_BLEND);
 	}
 }
 
-void PSIGLRenderer::render(const shared_ptr<PSIRenderScene> &scene,
-			   const shared_ptr<PSIRenderContext> &ctx, 
-			   const shared_ptr<PSICamera> &camera) {
+void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
+			   const RenderContextSharedPtr &ctx, 
+			   const CameraSharedPtr &camera) {
 	// Render directly to the screen.
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

@@ -47,7 +47,7 @@ GLboolean PSITextRenderer::init() {
 	update_mesh();
 
 	// Create our texture for storing the font atlas.
-	shared_ptr<PSIGLTexture> texture = make_shared<PSIGLTexture>();
+	GLTextureSharedPtr texture = PSIGLTexture::create();
 	assert(texture != nullptr);
 
 	// Assign our texture for the font atlas we are using
@@ -156,7 +156,7 @@ void PSITextRenderer::set_text(std::string text) {
 #define INDEXES_PER_QUAD 6
 
 // Bake the data for text rendered with specified font, color and position.
-PSITextRenderer::unique_data PSITextRenderer::bake_text(const shared_ptr<PSIFontAtlas> &atlas, std::string text) {
+PSITextRenderer::unique_data PSITextRenderer::bake_text(const FontAtlasSharedPtr &atlas, std::string text) {
 	assert(atlas != nullptr);
 	assert(text.size() > 0);
 
@@ -253,7 +253,7 @@ PSITextRenderer::unique_data PSITextRenderer::bake_text(const shared_ptr<PSIFont
 	return data;
 }
 
-void PSITextRenderer::draw(const shared_ptr<PSIRenderContext> &ctx) {
+void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	// Empty string, don't draw.
 	if (_text.size() == 0) {
 		return;

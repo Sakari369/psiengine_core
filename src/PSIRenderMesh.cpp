@@ -19,33 +19,12 @@ GLboolean PSIRenderMesh::init() {
 		return false;
 	}
 
-	add_default_uniforms();
-
 	psilog(PSILog::INIT, "Initialized PSIRenderMesh");
 
 	return true;
 }
 
-shared_ptr<PSIRenderMesh> PSIRenderMesh::clone() {
-	shared_ptr<PSIRenderMesh> clone_mesh = make_shared<PSIRenderMesh>(*this);
-	// Need to re-initialize.
-	clone_mesh->init();
-
-	return clone_mesh;
-}
-
-void PSIRenderMesh::add_default_uniforms() {
-	// Make sure to clear this, if we are re-initializing the class.
-	uniforms->clear();
-	uniforms->add_mat4("u_model_view_projection_matrix", [this]() { return get_model_view_projection_matrix(); });
-	if (_has_normal_matrix == true) {
-		uniforms->add_mat3("u_normal_matrix", [this]() { return get_normal_matrix(); });
-	}
-
-	psilog(PSILog::OPENGL, "Added default uniforms");
-}
-
-void PSIRenderMesh::generate_color_data(const shared_ptr<PSIGLMaterial> &material, const shared_ptr<PSIGeometryData> &gpu_data) {
+void PSIRenderMesh::generate_color_data(const GLMaterialSharedPtr &material, const GeometryDataSharedPtr &gpu_data) {
 	assert(gpu_data != nullptr);
 	assert(material != nullptr);
 	assert(gpu_data->positions.size() > 0);

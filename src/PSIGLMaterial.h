@@ -12,6 +12,9 @@
 #include "PSIGLShader.h"
 #include "PSIGLTexture.h"
 
+class PSIGLMaterial;
+typedef shared_ptr<PSIGLMaterial> GLMaterialSharedPtr;
+
 class PSIGLMaterial {
 	public:
 		PSIGLMaterial() = default;
@@ -27,16 +30,12 @@ class PSIGLMaterial {
 				_shader(rhs._shader) {
 		}
 
-		shared_ptr<PSIGLMaterial> clone() {
-			return make_shared<PSIGLMaterial>(*this);
+		static GLMaterialSharedPtr create() {
+			return make_shared<PSIGLMaterial>();
 		}
 
-		// TODO: is this used ?
-		void set_uniforms() {
-			assert(_shader != nullptr);
-			// We know all the values we have, so set all of those
-			//_shader->set_uniform("u_opacity", get_opacity());
-			//_shader->set_uniform("u_is_textured", _textured);
+		GLMaterialSharedPtr clone() {
+			return make_shared<PSIGLMaterial>(*this);
 		}
 
 		void set_color(glm::vec4 color) {
@@ -70,19 +69,19 @@ class PSIGLMaterial {
 			return _lit;
 		}
 
-		void set_shader(shared_ptr<PSIGLShader> shader) {
+		void set_shader(ShaderSharedPtr shader) {
 			_shader = shader;
 		}
-		shared_ptr<PSIGLShader> get_shader() {
+		ShaderSharedPtr get_shader() {
 			return _shader;
 		}
 
 		// Should we have a clearTexture 
-		void set_texture(shared_ptr<PSIGLTexture> texture) {
+		void set_texture(GLTextureSharedPtr texture) {
 			_texture = texture;
 			_textured = true;
 		}
-		shared_ptr<PSIGLTexture> get_texture() {
+		GLTextureSharedPtr get_texture() {
 			return _texture;
 		}
 
@@ -112,7 +111,7 @@ class PSIGLMaterial {
 		// Do we need to update GPU data for render objects with this material ?
 		GLboolean _needs_update = false;
 		// Texture for this material.
-		shared_ptr<PSIGLTexture> _texture;
+		GLTextureSharedPtr _texture;
 		// Shader that is used to render this material.
-		shared_ptr<PSIGLShader> _shader;
+		ShaderSharedPtr _shader;
 };

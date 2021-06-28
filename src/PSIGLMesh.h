@@ -9,6 +9,9 @@
 #include "PSIGlobals.h"
 #include "PSIGLUtils.h"
 
+class PSIGLMesh;
+typedef shared_ptr<PSIGLMesh> GLMeshSharedPtr;
+
 class PSIGLMesh {
 	public:
 		// Vertex attrib buffer names.
@@ -51,6 +54,10 @@ class PSIGLMesh {
 
 		PSIGLMesh(GLuint vao = 0, GLsizei draw_count = 0, GLuint draw_mode = GL_TRIANGLES);
 		~PSIGLMesh();
+
+		static GLMeshSharedPtr create() {
+			return make_shared<PSIGLMesh>();
+		}
 
 		bool init();
 

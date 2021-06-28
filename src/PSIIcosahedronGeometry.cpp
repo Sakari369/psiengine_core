@@ -3,8 +3,8 @@
 namespace PSIGeometry {
 namespace Icosahedron {
 
-shared_data icosahedron(GLint recursion) {
-	shared_data geom = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr icosahedron(GLint recursion) {
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 	if (geom == nullptr) {
 		return nullptr;
 	}

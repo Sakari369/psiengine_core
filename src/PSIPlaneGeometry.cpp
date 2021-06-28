@@ -4,8 +4,8 @@
 namespace PSIGeometry {
 namespace Plane {
 
-shared_ptr<PSIGeometryData> uniform_plane(GLint rows, GLboolean repeat_texture) {
-	shared_ptr<PSIGeometryData> data = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr uniform_plane(GLint rows, GLboolean repeat_texture) {
+	GeometryDataSharedPtr data = PSIGeometryData::create();
 	if (data == nullptr) {
 		return nullptr;
 	}

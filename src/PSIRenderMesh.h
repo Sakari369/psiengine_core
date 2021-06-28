@@ -6,6 +6,9 @@
 
 #include "PSIRenderObj.h"
 
+class PSIRenderMesh;
+typedef shared_ptr<PSIRenderMesh> RenderMeshSharedPtr;
+
 class PSIRenderMesh : public PSIRenderObj {
 	private:
 		// Do we pass normals to the mesh shader ?
@@ -15,17 +18,23 @@ class PSIRenderMesh : public PSIRenderObj {
 		PSIRenderMesh() = default;
 		virtual ~PSIRenderMesh() = default;
 
+		static RenderMeshSharedPtr create() {
+			return make_shared<PSIRenderMesh>();
+		}
+
 		// Clone this mesh.
-		shared_ptr<PSIRenderMesh> clone();
+		RenderMeshSharedPtr clone() {
+			RenderMeshSharedPtr clone_mesh = make_shared<PSIRenderMesh>(*this);
+			// Need to re-initialize.
+			clone_mesh->init();
+			return clone_mesh;
+		}
 
 		// Create mesh with geometry and material and add default uniforms.
 		GLboolean init();
 
-		// Add default shader uniform variables for this mesh.
-		void add_default_uniforms();
-
 		// Create colors from the material color.
-		void generate_color_data(const shared_ptr<PSIGLMaterial> &material, const shared_ptr<PSIGeometryData> &gpu_data);
+		void generate_color_data(const GLMaterialSharedPtr &material, const GeometryDataSharedPtr &gpu_data);
 
 		// For differentating from PSIRenderObj.
 		void print_id() {

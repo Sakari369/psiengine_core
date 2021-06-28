@@ -12,6 +12,9 @@
 #include "PSIOpenGL.h"
 #include "PSITypes.h"
 
+class PSIGLTexture;
+typedef shared_ptr<PSIGLTexture> GLTextureSharedPtr;
+
 class PSIGLTexture {
 	public:
 
@@ -70,6 +73,10 @@ class PSIGLTexture {
 
 	PSIGLTexture() = default;
 	~PSIGLTexture() = default;
+
+	static GLTextureSharedPtr create() {
+		return make_shared<PSIGLTexture>();
+	}
 
 	// Initialize a default texture.
 	GLuint init();

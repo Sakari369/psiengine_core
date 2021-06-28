@@ -7,10 +7,17 @@
 #include "PSIGlobals.h"
 #include "PSIOpenGL.h"
 
+class PSILight;
+typedef shared_ptr<PSILight> LightSharedPtr;
+
 class PSILight {
 	public:
 		PSILight() = default;
 		~PSILight() = default;
+
+		static LightSharedPtr create() {
+			return make_shared<PSILight>();
+		}
 
 		enum class LightType {
 			AMBIENT = 0,

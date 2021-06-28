@@ -13,6 +13,9 @@
 #include "PSIFileUtils.h"
 #include "PSIGLUtils.h"
 
+class PSIGLShader;
+typedef shared_ptr<PSIGLShader> ShaderSharedPtr;
+
 class PSIGLShader {
 	public:
 		enum ShaderDefs {
@@ -43,6 +46,10 @@ class PSIGLShader {
 
 		PSIGLShader() = default;
 		~PSIGLShader() = default;
+
+		static ShaderSharedPtr create() {
+			return make_shared<PSIGLShader>();
+		}
 
 		// Setting shader uniforms.
 		template <typename Type>

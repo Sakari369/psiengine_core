@@ -2,7 +2,7 @@
 
 namespace PSIGeometry {
 
-void add_buffer_defaults(const SharedGeometryData &geom) {
+void add_buffer_defaults(const GeometryDataSharedPtr &geom) {
 	geom->buffers = {
 		{ 
 			PSIGLMesh::BufferName::POSITION,
@@ -49,8 +49,8 @@ void add_buffer_defaults(const SharedGeometryData &geom) {
 	};
 }
 
-SharedGeometryData cube() {
-	SharedGeometryData geom = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr cube() {
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 	geom->positions = PSIGeometry::Cube::positions;
 	geom->normals   = PSIGeometry::Cube::normals;
 	geom->texcoords = PSIGeometry::Cube::texcoords;
@@ -60,8 +60,8 @@ SharedGeometryData cube() {
 	return geom;
 }
 
-SharedGeometryData cube_tetrahedron() {
-	SharedGeometryData geom = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr cube_tetrahedron() {
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 
 	geom->positions = PSIGeometry::CubeTetrahedron::positions;
 	geom->texcoords = PSIGeometry::CubeTetrahedron::texcoords;
@@ -96,8 +96,8 @@ SharedGeometryData cube_tetrahedron() {
 	return geom;
 }
 
-SharedGeometryData tetrahedron() {
-	SharedGeometryData geom = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr tetrahedron() {
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 
 	geom->positions = PSIGeometry::Tetrahedron::positions;
 	geom->texcoords = PSIGeometry::Tetrahedron::texcoords;
@@ -132,22 +132,22 @@ SharedGeometryData tetrahedron() {
 	return geom;
 }
 
-SharedGeometryData cuboid(GLfloat width, GLfloat height, GLfloat depth) {
-	SharedGeometryData geom = PSIGeometry::Cuboid::cuboid(width, height, depth);
+GeometryDataSharedPtr cuboid(GLfloat width, GLfloat height, GLfloat depth) {
+	GeometryDataSharedPtr geom = PSIGeometry::Cuboid::cuboid(width, height, depth);
 	add_buffer_defaults(geom);
 
 	return geom;
 }
 
-SharedGeometryData prism(GLfloat radius, GLfloat depth) {
-	SharedGeometryData geom = PSIGeometry::Prism::prism(radius, depth);
+GeometryDataSharedPtr prism(GLfloat radius, GLfloat depth) {
+	GeometryDataSharedPtr geom = PSIGeometry::Prism::prism(radius, depth);
 	add_buffer_defaults(geom);
 
 	return geom;
 }
 
-SharedGeometryData cube_inverted() {
-	SharedGeometryData geom = make_shared<PSIGeometryData>();
+GeometryDataSharedPtr cube_inverted() {
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 	geom->positions = PSIGeometry::Cube::positions;
 	geom->normals   = PSIGeometry::Cube::normals;
 	geom->texcoords = PSIGeometry::Cube::texcoords;
@@ -157,15 +157,15 @@ SharedGeometryData cube_inverted() {
 	return geom;
 }
 
-SharedGeometryData plane(GLint rows, GLboolean repeat_texture) {
-	SharedGeometryData geom = PSIGeometry::Plane::uniform_plane(rows, repeat_texture);
+GeometryDataSharedPtr plane(GLint rows, GLboolean repeat_texture) {
+	GeometryDataSharedPtr geom = PSIGeometry::Plane::uniform_plane(rows, repeat_texture);
 	add_buffer_defaults(geom);
 
 	return geom;
 }
 
-SharedGeometryData icosahedron(GLint recursion) {
-	SharedGeometryData geom = PSIGeometry::Icosahedron::icosahedron(recursion);
+GeometryDataSharedPtr icosahedron(GLint recursion) {
+	GeometryDataSharedPtr geom = PSIGeometry::Icosahedron::icosahedron(recursion);
 	add_buffer_defaults(geom);
 
 	return geom;
@@ -197,10 +197,10 @@ std::vector<glm::vec3> create_poly(GLint num_points, GLfloat angle_offset, GLflo
 }
 
 /*
-SharedGeometryData sphere(GLfloat radius, GLint widthSegments, GLint heightSegments,
+GeometryDataSharedPtr sphere(GLfloat radius, GLint widthSegments, GLint heightSegments,
 	                           GLfloat phiStart, GLfloat phiLength, GLfloat thetaStart, GLfloat thetaLength) {
 
-	SharedGeometryData geom = make_shared<PSIGeometryData>();
+	GeometryDataSharedPtr geom = PSIGeometryData::create();
 	PSIGeometry::Sphere::sphere(radius, widthSegments, heightSegments, phiStart, phiLength, thetaStart, thetaLength);
 
 	return geom;
