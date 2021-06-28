@@ -1,0 +1,3 @@
+[submodule "src/ext/freetype-gl"]
+	path = src/ext/freetype-gl
+	url = https://github.com/rougier/freetype-gl
