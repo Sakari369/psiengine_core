@@ -1,5 +1,9 @@
 #include "PSIAudio.h"
 
+#define OFFSET_PTR(p, offset) (((ma_uint8*)(p)) + (offset))
+
+bool PSIAudio::m_loop = false;
+
 // Audio data callback for reading more data into audio decoder.
 static void ma_audio_data_callback(ma_device *device, void *output, const void *input, ma_uint32 framecount) {
 	ma_decoder *decoder = (ma_decoder *)device->pUserData;
@@ -7,7 +11,22 @@ static void ma_audio_data_callback(ma_device *device, void *output, const void *
 		return;
 	}
 
-	ma_decoder_read_pcm_frames(decoder, output, framecount);
+	ma_uint64 pcm_frames_remaining = framecount;
+	while (pcm_frames_remaining > 0) {
+		ma_uint32 bytes_per_frame = ma_get_bytes_per_frame(device->playback.format, device->playback.channels);
+		void *running_output = OFFSET_PTR(output, (framecount - pcm_frames_remaining) * bytes_per_frame);
+		ma_uint64 decoded_pcm_frame_count = ma_decoder_read_pcm_frames(decoder, running_output, pcm_frames_remaining);
+
+		// Loop back to the start if we've reached the end. 
+		if (PSIAudio::m_loop == true) {
+			if (decoded_pcm_frame_count < pcm_frames_remaining) {
+				ma_decoder_seek_to_pcm_frame(decoder, 0);
+			}
+		}
+
+		pcm_frames_remaining -= decoded_pcm_frame_count;
+	}
+
 	(void)input;
 }
 

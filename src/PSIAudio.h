@@ -33,6 +33,9 @@ class PSIAudio {
 		PSIAudio() = default;
 		~PSIAudio() = default;
 
+		// Should playback loop ?
+		static bool m_loop;
+
 		// Initialize audio config and context.
 		bool init();
 		// Uninitialize.
@@ -49,5 +52,9 @@ class PSIAudio {
 
 		void set_playing(bool playing) {
 			_playing = playing;
+		}
+
+		void set_loop(bool loop) {
+			m_loop = loop;
 		}
 };
