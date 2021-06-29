@@ -2,7 +2,7 @@
 
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
-const GLint PSIVideo::DEF_MSAA_SAMPLES = 4;
+const GLint PSIVideo::DEF_MSAA_SAMPLES = 8;
 
 PSIVideo::~PSIVideo() {
 }
