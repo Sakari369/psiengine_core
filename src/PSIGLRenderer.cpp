@@ -120,6 +120,10 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	}
 
+	// Store the camera in our context.
+	// This way the objects have access to it via the context.
+	ctx->camera = camera;
+
 	STACK_PUSH(ctx->projection);
 		// Get the default projection matrix.
 		ctx->projection.top() = camera->get_projection_matrix();
@@ -128,9 +132,6 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 			// Look at where the camera view is looking at.
 			// This can be disabled per object with obj->set_is_camera_translated().
 			ctx->view.top() = ctx->view.top() * camera->get_looking_at_matrix();
-			// Store the camera in our context.
-			// This way the objects have access to it via the context.
-			ctx->camera_view = camera;
 
 			if (scene->m_render_objs.empty() != true) {
 				// Sort our scene objects.

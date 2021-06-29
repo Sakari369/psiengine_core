@@ -36,7 +36,7 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	GLboolean is_translated = is_translated_by_camera();
 	if (is_translated == false) {
 		STACK_PUSH(ctx->view);
-		ctx->view.top() = ctx->camera_view->get_looking_at_matrix_without_translation();
+		ctx->view.top() = ctx->camera->get_looking_at_matrix_without_translation();
 	}
 
 	// Get our rendering assets.
