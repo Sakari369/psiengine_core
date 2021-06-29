@@ -171,7 +171,7 @@ GLint PSIGLRenderer::set_draw_mode(GLint draw_mode) {
 
 GLint PSIGLRenderer::cycle_draw_mode() {
 	GLint draw_mode = _draw_mode + 1;
-	if (draw_mode > DrawMode::drawMode_MAX) {
+	if (draw_mode > DrawMode::DrawMode_MAX) {
 		draw_mode = 0;
 	}
 

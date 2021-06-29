@@ -23,7 +23,7 @@ class PSIGLRenderer {
 			SHADED = 0,
 			WIREFRAME,
 			WIREFRAME_BLENDED,
-			drawMode_MAX = WIREFRAME_BLENDED
+			DrawMode_MAX = WIREFRAME_BLENDED
 		};
 
 		enum CullMode {
