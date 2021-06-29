@@ -74,65 +74,31 @@ GLint PSIGLRenderer::init() {
 void PSIGLRenderer::draw_render_objs(const RenderSceneSharedPtr &scene,
                                      const RenderContextSharedPtr &ctx,
                                      const CameraSharedPtr &camera) {
-	if (scene->m_render_objs.empty() == true) {
-		return;
-	}
 
-	if (_blending_enabled) {
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	}
-	if (_wireframe) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	}
+	ShaderSharedPtr previous_shader = nullptr;
+	for (const auto &obj : scene->m_render_objs) {
+		ShaderSharedPtr shader = obj->get_shader();
+		assert(shader != nullptr);
 
-	STACK_PUSH(ctx->view);
-		// Look at where the camera view is looking at.
-		// This can be disabled per object with obj->set_is_camera_translated().
-		ctx->view.top() = ctx->view.top() * camera->get_looking_at_matrix();
-		// Store the camera in our context.
-		// This way the objects have access to it via the context.
-		ctx->camera_view = camera;
+		// Don't change shader, if shader has not changed.
+		if (shader != previous_shader) {
+			shader->use_program();
 
-		// Sort our scene objects.
-		if (_sorting == true) {
-			scene->sort();
+			// Setup scene lightning.
+			ctx->lights = scene->get_lights();
+			setup_lights(shader, ctx);
+
+			// Set once per frame shader uniforms.
+			shader->set_uniform("u_elapsed_time", ctx->elapsed_time);
+
+			previous_shader = shader;
 		}
-
-		ShaderSharedPtr previous_shader = nullptr;
-		for (const auto &obj : scene->m_render_objs) {
-			ShaderSharedPtr shader = obj->get_shader();
-			assert(shader != nullptr);
-
-			// Don't change shader, if shader has not changed.
-			if (shader != previous_shader) {
-				shader->use_program();
-
-				// Setup scene lightning.
-				ctx->lights = scene->get_lights();
-				setup_lights(shader, ctx);
-
-				// Set shader uniforms.
-				shader->set_uniform("u_elapsed_time", ctx->elapsed_time);
-
-				previous_shader = shader;
-			}
-
-			// We run logic here also, so we don't have to loop the objects twice per frame.
-			obj->logic(ctx);
-			if (obj->is_visible()) {
-				obj->draw(ctx);
-			}
+		
+		// We run logic here also, so we don't have to loop the objects twice per frame.
+		obj->logic(ctx);
+		if (obj->is_visible()) {
+			obj->draw(ctx);
 		}
-	ctx->view.pop();
-
-	//psilog(PSILog::FREQ, "Scene rendered");
-
-	if (_wireframe == true) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	}
-	if (_blending_enabled == true) {
-		glDisable(GL_BLEND);
 	}
 }
 
@@ -146,12 +112,45 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 	glClearColor(ctx->bg_color.r, ctx->bg_color.g, ctx->bg_color.b, ctx->bg_color.a);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	if (_blending_enabled) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+	if (_wireframe) {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	}
+
 	STACK_PUSH(ctx->projection);
 		// Get the default projection matrix.
 		ctx->projection.top() = camera->get_projection_matrix();
-		// Draw our objects.
-		draw_render_objs(scene, ctx, camera);
+
+		STACK_PUSH(ctx->view);
+			// Look at where the camera view is looking at.
+			// This can be disabled per object with obj->set_is_camera_translated().
+			ctx->view.top() = ctx->view.top() * camera->get_looking_at_matrix();
+			// Store the camera in our context.
+			// This way the objects have access to it via the context.
+			ctx->camera_view = camera;
+
+			if (scene->m_render_objs.empty() != true) {
+				// Sort our scene objects.
+				if (_sorting == true) {
+					scene->sort();
+				}
+				// Draw render objects in the scene.
+				draw_render_objs(scene, ctx, camera);
+			}
+		ctx->view.pop();
 	ctx->projection.pop();
+
+	if (_wireframe == true) {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	}
+	if (_blending_enabled == true) {
+		glDisable(GL_BLEND);
+	}
+
+	//psilog(PSILog::FREQ, "Scene rendered");
 }
 
 GLint PSIGLRenderer::set_draw_mode(GLint draw_mode) {
