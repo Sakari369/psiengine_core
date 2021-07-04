@@ -88,22 +88,22 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 			// We will be pushing 3 normals, as we are pushing 3 positions.
 		
 			// Calculate the middle points for side a.
-			glm::vec3 p1_1 = geom->positions.at(tri.i[0]);
-			glm::vec3 p1_2 = geom->positions.at(tri.i[1]);
+			glm::vec3 p1_1 = geom->positions.at(tri[0]);
+			glm::vec3 p1_2 = geom->positions.at(tri[1]);
 			glm::vec3 mid1 = (p1_1 + p1_2) / 2.0f;
 			geom->positions.push_back(glm::normalize(mid1));
 			GLint a = vertex_count++;
 
 			// Calculate the middle points for side b.
-			glm::vec3 p2_1 = geom->positions.at(tri.i[1]);
-			glm::vec3 p2_2 = geom->positions.at(tri.i[2]);
+			glm::vec3 p2_1 = geom->positions.at(tri[1]);
+			glm::vec3 p2_2 = geom->positions.at(tri[2]);
 			glm::vec3 mid2 = (p2_1 + p2_2) / 2.0f;
 			geom->positions.push_back(glm::normalize(mid2));
 			GLint b = vertex_count++;
 
 			// Calculate the middle points for side c.
-			glm::vec3 p3_1 = geom->positions.at(tri.i[2]);
-			glm::vec3 p3_2 = geom->positions.at(tri.i[0]);
+			glm::vec3 p3_1 = geom->positions.at(tri[2]);
+			glm::vec3 p3_2 = geom->positions.at(tri[0]);
 			glm::vec3 mid3 = (p3_1 + p3_2) / 2.0f;
 			geom->positions.push_back(glm::normalize(mid3));
 			GLint c = vertex_count++;
@@ -120,7 +120,7 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 			//    /     \
 			//   .___.___.
 			//  1    b    2
-			PSI::tri_indexes t0ac = {{ tri.i[0], a, c }};
+			PSI::tri_indexes t0ac = {{ tri[0], a, c }};
 			split_tri_indexes.push_back(t0ac);
 
 			//       0
@@ -130,7 +130,7 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 			//    /.    \
 			//   .:::.___.
 			//  1    b    2
-			PSI::tri_indexes t1ab = {{ tri.i[1], b, a }};
+			PSI::tri_indexes t1ab = {{ tri[1], b, a }};
 			split_tri_indexes.push_back(t1ab);
 
 			//       0
@@ -140,7 +140,7 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 			//    /    :\
 			//   .___.'::.
 			//  1    b    2
-			PSI::tri_indexes t2cb = {{ tri.i[2], c, b }};
+			PSI::tri_indexes t2cb = {{ tri[2], c, b }};
 			split_tri_indexes.push_back(t2cb);
 
 			// The base formation, in the middle.
@@ -161,9 +161,9 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 
 	// Add indexes..
 	for (auto tri : tri_indexes) {
-		geom->indexes.push_back((GLuint)tri.i[0]);
-		geom->indexes.push_back((GLuint)tri.i[1]);
-		geom->indexes.push_back((GLuint)tri.i[2]);
+		geom->indexes.push_back((GLuint)tri[0]);
+		geom->indexes.push_back((GLuint)tri[1]);
+		geom->indexes.push_back((GLuint)tri[2]);
 	}
 
 	// We can just use the positions as the normals, 

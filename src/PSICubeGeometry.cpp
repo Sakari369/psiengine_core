@@ -67,12 +67,12 @@ namespace PSIGeometry {
 
 		// Actual positions that we upload
 		const std::vector<glm::vec3> positions = {
-			faces[0].p[0], faces[0].p[1], faces[0].p[2], faces[0].p[3], // front
-			faces[1].p[0], faces[1].p[1], faces[1].p[2], faces[1].p[3], // back
-			faces[2].p[0], faces[2].p[1], faces[2].p[2], faces[2].p[3], // right
-			faces[3].p[0], faces[3].p[1], faces[3].p[2], faces[3].p[3], // left
-			faces[4].p[0], faces[4].p[1], faces[4].p[2], faces[4].p[3], // bottom
-			faces[5].p[0], faces[5].p[1], faces[5].p[2], faces[5].p[3], // top
+			faces[0][0], faces[0][1], faces[0][2], faces[0][3], // front
+			faces[1][0], faces[1][1], faces[1][2], faces[1][3], // back
+			faces[2][0], faces[2][1], faces[2][2], faces[2][3], // right
+			faces[3][0], faces[3][1], faces[3][2], faces[3][3], // left
+			faces[4][0], faces[4][1], faces[4][2], faces[4][3], // bottom
+			faces[5][0], faces[5][1], faces[5][2], faces[5][3], // t
 		};
 
 		// indexes for the 4 vertexes per face
