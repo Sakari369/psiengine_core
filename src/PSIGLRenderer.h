@@ -15,7 +15,9 @@
 
 class PSIGLRenderer {
 	public:
-		PSIGLRenderer() = default;
+		PSIGLRenderer(glm::ivec2 viewport_size) {
+			_viewport_size = viewport_size;
+		}
 		~PSIGLRenderer() = default;
 
 		// Draw mode. Do we render all objects with shader or wireframe ?

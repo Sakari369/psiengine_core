@@ -153,11 +153,8 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 		glViewport(0, 0, texture_size.x, texture_size.y);
 	} else {
 		// Render to screen buffer.
-		// When a GL context is first attached to a window, width and height are set to the dimensions of that window.
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		if (_viewport_size.x != 0 && _viewport_size.y != 0) {
-			glViewport(0, 0, _viewport_size.x, _viewport_size.y);
-		}
+		glViewport(0, 0, _viewport_size.x, _viewport_size.y);
 	}
 
 	// Clear the screen.

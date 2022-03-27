@@ -1,7 +1,7 @@
 [requires]
 glm/0.9.9.8
 glew/2.2.0
-glfw/3.3.4
+glfw/3.3.6
 freetype/2.10.4
 
 [generators]

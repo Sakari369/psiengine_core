@@ -49,8 +49,8 @@ class PSIVideo {
 		}
 
 		void set_window_size(GLint width, GLint height) {
-			_win_size.w = width;
-			_win_size.h = height;
+			_win_size.x = width;
+			_win_size.y = height;
 		}
 
 		void set_window_title(std::string window_title) {
@@ -74,13 +74,6 @@ class PSIVideo {
 			return _fullscreen;
 		}
 
-		GLuint get_window_width() {
-			return _viewport.size.w;
-		}
-		GLuint get_window_height() {
-			return _viewport.size.h;
-		}
-
 		void set_vsync(bool vsync) {
 			_vsync = vsync;
 		}
@@ -89,7 +82,7 @@ class PSIVideo {
 			return _viewport;
 		}
 
-		glm::ivec2 get_window_size() {
+		glm::ivec2 get_viewport_size() {
 			return glm::ivec2(_viewport.size.w, _viewport.size.h);
 		}
 
@@ -124,13 +117,17 @@ class PSIVideo {
 			return mode == GLFW_CURSOR_NORMAL ? true : false;
 		}
 
+		// Get monitor scaling factors for current fullscreen monitor.
+		glm::vec2 get_monitor_content_scaling();
+
 	private:
 		// Window object.
 		GLFWwindow *_window;
 		// Viewport dimensions.
 		dimensions _viewport;
-		// Window size. Might be different than the viewport dimensions, eg. on retina screens.
-		PSIMath::size<GLint> _win_size;
+		// Window size.
+		glm::ivec2 _win_size = { 0.0f, 0.0f };
+		// Window size.
 
 		// Multisampling samples.
 		GLint _msaa_samples = 0;
@@ -147,12 +144,14 @@ class PSIVideo {
 		// Window title string.
 		std::string _window_title;
 
+		glm::vec2 _content_scaling = { 1.0f, 1.0f };
+
 		// Called on GLFW error.
 		static void error_callback(int error, const char *desc) {
 			printf("GLFW error %d: %s", error, desc);
 		}
 
-		// Get the monitor we are displaying on.
+		// Get current fullscreen monitor.
 		GLFWmonitor *get_fullscreen_monitor();
 
 		// Initialize opengl extensions loader.
