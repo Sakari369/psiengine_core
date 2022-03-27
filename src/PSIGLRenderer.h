@@ -46,6 +46,9 @@ class PSIGLRenderer {
 		// Setup shader uniforms for lights.
 		void setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx);
 
+		// Initialize texture where we should render, if rendering scene to texture.
+		GLint init_offscreen_texture(glm::ivec2 size);
+
 		GLint cycle_draw_mode();
 		GLint set_draw_mode(GLint draw_mode);
 
@@ -64,10 +67,31 @@ class PSIGLRenderer {
 		RenderContextSharedPtr get_context() {
 			return _ctx;
 		}
+		void set_viewport_size(glm::ivec2 size) {
+			_viewport_size = size;
+		}
+		GLTextureSharedPtr get_offscreen_texture() {
+			return _offscreen_texture;
+		}
+		GLuint get_offscreen_fbo() {
+			return _offscreen_fbo;
+		}
+		GLuint get_offscreen_depth_buffer() {
+			return _offscreen_depth_buffer;
+		}
 
 	private:
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
 		RenderContextSharedPtr _ctx;
+
+		// Offscreen framebuffer we are rendering to.
+		GLuint _offscreen_fbo = -1;
+
+		// Offscreen texture we are rendering to.
+		GLTextureSharedPtr _offscreen_texture;
+
+		// Offscreen depth buffer.
+		GLuint _offscreen_depth_buffer = -1;
 
 		// Draw mode sets wireframe and blending together.
 		GLint _draw_mode = DrawMode::SHADED;
@@ -82,4 +106,6 @@ class PSIGLRenderer {
 		bool _sorting = true;
 		// Current MSAA level.
 		GLfloat _msaa_samples = PSIVideo::DEF_MSAA_SAMPLES;
+		// Viewport size.
+		glm::ivec2 _viewport_size = glm::ivec2(0, 0);
 };

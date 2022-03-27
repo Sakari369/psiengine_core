@@ -89,6 +89,10 @@ class PSIVideo {
 			return _viewport;
 		}
 
+		glm::ivec2 get_window_size() {
+			return glm::ivec2(_viewport.size.w, _viewport.size.h);
+		}
+
 		void flip() {
 			glfwSwapBuffers(_window);
 		}

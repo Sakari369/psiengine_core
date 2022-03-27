@@ -39,6 +39,7 @@ bool PSIVideo::init() {
 		glfwWindowHint(GLFW_GREEN_BITS, video_mode->greenBits);
 		glfwWindowHint(GLFW_BLUE_BITS, video_mode->blueBits);
 		glfwWindowHint(GLFW_REFRESH_RATE, video_mode->refreshRate);
+		glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
 
 		// Store the window size we got from this monitor.
 		_win_size.w = video_mode->width;

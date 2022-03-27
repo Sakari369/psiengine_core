@@ -84,7 +84,7 @@ class PSIGLTexture {
 	// Bind this texture to our texture id.
 	void bind() {
 		glBindTexture(_target, _id);
-		//psilog(PSILog::FREQ, "Bound texture with target = %d, id = %d", _target, _id);
+		psilog(PSILog::FREQ, "Bound texture with target = %d, id = %d", _target, _id);
 	}
 	// Unbind this texture.
 	void unbind() {

@@ -46,8 +46,6 @@ class PSIRenderContext {
 
 		// Background color.
 		glm::vec4 bg_color = glm::vec4(0.2f, 0.2f, 0.2, 1.0f);
-		// Viewport size.
-		glm::vec2 viewport_size = glm::vec2(0.0f, 0.0f);
 
 		// Model-view-projection stacks.
 		// For easy restoration of mvp matrixes.

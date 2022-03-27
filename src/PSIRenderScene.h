@@ -82,10 +82,20 @@ class PSIRenderScene {
 			return _lights;
 		}
 
+		void set_render_to_texture(bool render_to_texture) {
+			_render_to_texture = render_to_texture;
+		}
+
+		bool get_render_to_texture() {
+			return _render_to_texture;
+		}
+
 		// All renderable objects in the scene.
 		RenderObjVector m_render_objs;
 
 	private:
 		// Light sources in the scene.
 		vector<LightSharedPtr> _lights;
+
+		bool _render_to_texture = false;
 };

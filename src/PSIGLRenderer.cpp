@@ -36,6 +36,41 @@ void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderCont
 	}
 }
 
+GLint PSIGLRenderer::init_offscreen_texture(glm::ivec2 size) {
+	// Generate the framebuffer object for the offscreen rendering.
+	glGenFramebuffers(1, &_offscreen_fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, _offscreen_fbo);
+
+	// Generate the texture we are going to render offscreen to.
+	_offscreen_texture = PSIGLTexture::create();
+	_offscreen_texture->set_format(GL_RGB);
+
+	// Set size and initialize.
+	_offscreen_texture->set_size(size);
+	_offscreen_texture->init();
+	_offscreen_texture->set_sample_mode(PSIGLTexture::TexSampleMode::NEAREST);
+
+	// Generate depth buffer.
+	glGenRenderbuffers(1, &_offscreen_depth_buffer);
+	glBindRenderbuffer(GL_RENDERBUFFER, _offscreen_depth_buffer);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, size.x, size.y);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, _offscreen_depth_buffer);
+
+	// Set texture as color attachment #0.
+	glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, _offscreen_texture->get_id(), 0);
+
+	// Set the list of draw buffers.
+	GLenum draw_buffers[1] = {GL_COLOR_ATTACHMENT0};
+	glDrawBuffers(1, draw_buffers); // "1" is the size of draw_buffers.
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+		printf("Failed initializing offscreen framebuffer");
+		return -1;
+	}
+
+	return 0;
+}
+
 GLint PSIGLRenderer::init() {
 	// Create our rendering context.
 	_ctx = PSIRenderContext::create();
@@ -105,8 +140,25 @@ void PSIGLRenderer::draw_render_objs(const RenderSceneSharedPtr &scene,
 void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 			   const RenderContextSharedPtr &ctx, 
 			   const CameraSharedPtr &camera) {
+
 	// Render directly to the screen.
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if (scene->get_render_to_texture() == true) {
+		assert(_offscreen_fbo != -1);
+
+		// In order for this to work, we need the viewport size.
+		// In case of the offscreen texture rendering, the viewport size can be the 
+		// size of the texture.
+		glm::ivec2 texture_size = _offscreen_texture->get_size();
+		glBindFramebuffer(GL_FRAMEBUFFER, _offscreen_fbo);
+		glViewport(0, 0, texture_size.x, texture_size.y);
+	} else {
+		// Render to screen buffer.
+		// When a GL context is first attached to a window, width and height are set to the dimensions of that window.
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if (_viewport_size.x != 0 && _viewport_size.y != 0) {
+			glViewport(0, 0, _viewport_size.x, _viewport_size.y);
+		}
+	}
 
 	// Clear the screen.
 	glClearColor(ctx->bg_color.r, ctx->bg_color.g, ctx->bg_color.b, ctx->bg_color.a);
