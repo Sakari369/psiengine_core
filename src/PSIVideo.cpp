@@ -1,8 +1,40 @@
 #include "PSIVideo.h"
 
+#include "ext/stb_image_write.h"
+
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
 const GLint PSIVideo::DEF_MSAA_SAMPLES = 8;
+
+int saveImage(const char *filepath, GLFWwindow *w) {
+	int width, height;
+	glfwGetFramebufferSize(w, &width, &height);
+
+	GLsizei nrChannels = 3;
+	GLsizei stride = nrChannels * width;
+	stride += (stride % 4) ? (4 - stride % 4) : 0;
+
+	GLsizei bufferSize = stride * height;
+	std::vector<char> buffer(bufferSize);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadBuffer(GL_FRONT);
+	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
+
+	stbi_flip_vertically_on_write(true);
+
+	return stbi_write_png(filepath, width, height, nrChannels, buffer.data(), stride);
+}
+
+bool PSIVideo::write_screen_to_file(std::string path) {
+	int retval = saveImage(path.c_str(), this->_window);
+	if (retval == 1) {
+		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
+		return true;
+	}
+
+	return false;
+}
 
 PSIVideo::~PSIVideo() {
 }
@@ -29,18 +61,6 @@ bool PSIVideo::init() {
 
 	// Create our window.
 	GLFWmonitor *fullscreen_monitor = get_fullscreen_monitor();
-	if (is_fullscreen() == true) {
-		// Get resolution for desired monitor.
-		const GLFWvidmode *fullscreen_mode = glfwGetVideoMode(fullscreen_monitor);
-		glfwWindowHint(GLFW_RED_BITS,     fullscreen_mode->redBits);
-		glfwWindowHint(GLFW_GREEN_BITS,   fullscreen_mode->greenBits);
-		glfwWindowHint(GLFW_BLUE_BITS,	  fullscreen_mode->blueBits);
-		glfwWindowHint(GLFW_REFRESH_RATE, fullscreen_mode->refreshRate);
-
-		// Use the window size we got from the fullscreen monitor.
-		_win_size.x = fullscreen_mode->width;
-		_win_size.y = fullscreen_mode->height;
-	}
 
 	// Get content scaling.
 	GLfloat xscale;
@@ -49,7 +69,21 @@ bool PSIVideo::init() {
 	_content_scaling = { xscale, yscale };
 	psilog(PSILog::VIDEO, "monitor content scale = %f x %f", xscale, yscale);
 
-	if (is_fullscreen() == false) {
+	// Get resolution for desired monitor.
+	const GLFWvidmode *fullscreen_mode = glfwGetVideoMode(fullscreen_monitor);
+
+	if (is_fullscreen() == true) {
+		glfwWindowHint(GLFW_RED_BITS,     fullscreen_mode->redBits);
+		glfwWindowHint(GLFW_GREEN_BITS,   fullscreen_mode->greenBits);
+		glfwWindowHint(GLFW_BLUE_BITS,	  fullscreen_mode->blueBits);
+		glfwWindowHint(GLFW_REFRESH_RATE, fullscreen_mode->refreshRate);
+
+		// Use the window size we got from the fullscreen monitor.
+		_win_size.x = _content_scaling.x * fullscreen_mode->width;
+		_win_size.y = _content_scaling.y * fullscreen_mode->height;
+
+		psilog(PSILog::VIDEO, "Window size got from fullscreen mode = %d x %d", _win_size.x, _win_size.y);
+	} else {
 		// If we are not going fullscreen, set the monitor to nullptr in order to create a window.
 		fullscreen_monitor = nullptr;
 	}
@@ -89,8 +123,8 @@ bool PSIVideo::init() {
 	glm::ivec2 viewport_size;
 	if (is_fullscreen() == true) {
 		// In fullscreen the monitor scaling affects the framebuffer width and height.
-		viewport_size.x = _win_size.x * _content_scaling.x;
-		viewport_size.y = _win_size.y * _content_scaling.y;
+		viewport_size.x = _win_size.x;
+		viewport_size.y = _win_size.y;
 	} else {
 		viewport_size.x = framebuf_width;
 		viewport_size.y = framebuf_height;

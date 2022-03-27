@@ -120,6 +120,8 @@ class PSIVideo {
 		// Get monitor scaling factors for current fullscreen monitor.
 		glm::vec2 get_monitor_content_scaling();
 
+		bool write_screen_to_file(std::string path);
+
 	private:
 		// Window object.
 		GLFWwindow *_window;
@@ -162,6 +164,7 @@ class PSIVideo {
 
 		// Print currently used MSAA samples.
 		void print_msaa_samples();
+
 		// Print viewport dimensions.
 		void print_viewport_dimensions();
 };

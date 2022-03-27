@@ -32,6 +32,7 @@ message("CMAKE_ARCHIVE_OUTPUT_DIRECTORY is ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
 
 set(SOURCES
 	src/ext/stb_image_impl.cpp
+	src/ext/stb_image_write_impl.cpp
 	src/ext/miniaudio_impl.cpp
 	src/ext/tiny_gltf_loader.cpp
 	src/PSIAudio.cpp
