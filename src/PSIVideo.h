@@ -97,6 +97,7 @@ class PSIVideo {
 		void set_window_should_close() {
 			glfwSetWindowShouldClose(_window, true);
 		}
+
 		GLint should_close_window() {
 			return glfwWindowShouldClose(_window);
 		}
@@ -112,6 +113,7 @@ class PSIVideo {
 			GLint enabled = (visible == true) ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED;
 			glfwSetInputMode(_window, GLFW_CURSOR, enabled);
 		}
+
 		bool is_cursor_visible() {
 			GLint mode = glfwGetInputMode(_window, GLFW_CURSOR);
 			return mode == GLFW_CURSOR_NORMAL ? true : false;
@@ -119,8 +121,6 @@ class PSIVideo {
 
 		// Get monitor scaling factors for current fullscreen monitor.
 		glm::vec2 get_monitor_content_scaling();
-
-		bool write_screen_to_file(std::string path);
 
 	private:
 		// Window object.
@@ -146,6 +146,7 @@ class PSIVideo {
 		// Window title string.
 		std::string _window_title;
 
+		// Monitor content scaling factors, these are eg. 2.0 on HiDPI displays.
 		glm::vec2 _content_scaling = { 1.0f, 1.0f };
 
 		// Called on GLFW error.

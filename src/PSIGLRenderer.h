@@ -13,8 +13,12 @@
 #include "PSIVideo.h"
 #include "PSICamera.h"
 
+class PSIGLRenderer;
+typedef shared_ptr<PSIGLRenderer> GLRendererSharedPtr;
+
 class PSIGLRenderer {
 	public:
+	 	// The renderer needs the viewport size.
 		PSIGLRenderer(glm::ivec2 viewport_size) {
 			_viewport_size = viewport_size;
 		}
@@ -33,6 +37,11 @@ class PSIGLRenderer {
 			FRONT = 1,
 			BACK = 2,
 		};
+		
+		// Static creation method.
+		static GLRendererSharedPtr create(glm::ivec2 viewport_size) {
+			return make_shared<PSIGLRenderer>(viewport_size);
+		}
 
 		GLint init();
 		void shutdown();
@@ -57,34 +66,53 @@ class PSIGLRenderer {
 		void set_sorting(GLboolean sorting) {
 			_sorting = sorting;
 		}
+
 		void set_msaa_samples(GLint msaa_samples) {
 			_msaa_samples = msaa_samples;
 		}
+
 		void set_cull_mode(GLint cull_mode) {
 			_cull_mode = cull_mode;
 		}
+
 		void set_wireframe(GLboolean wireframe) {
 			_wireframe = wireframe;
 		}
+
 		RenderContextSharedPtr get_context() {
 			return _ctx;
 		}
+
 		void set_viewport_size(glm::ivec2 size) {
 			_viewport_size = size;
 		}
+
 		GLTextureSharedPtr get_offscreen_texture() {
 			return _offscreen_texture;
 		}
+
 		GLuint get_offscreen_fbo() {
 			return _offscreen_fbo;
 		}
+
 		GLuint get_offscreen_depth_buffer() {
 			return _offscreen_depth_buffer;
 		}
 
+		// Store reference to the PSIVideo instance.
+		void set_video(const shared_ptr<PSIVideo> &video) {
+			_video = video;
+		}
+
+		// Write current OpenGL buffer to PNG file.
+		bool write_screen_to_file(std::string path);
+
 	private:
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
 		RenderContextSharedPtr _ctx;
+
+		// The video instance reference for accessing the video data and so on.
+		shared_ptr<PSIVideo> _video;
 
 		// Offscreen framebuffer we are rendering to.
 		GLuint _offscreen_fbo = -1;

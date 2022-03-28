@@ -1,8 +1,47 @@
 #include "PSIGLRenderer.h"
 
+#include "ext/stb_image_write.h"
+
+using namespace std::chrono;
+
 void PSIGLRenderer::shutdown() {
 	glDeleteFramebuffers(1, &_ctx->main_fbo);
 	glDeleteFramebuffers(1, &_ctx->msaa_fbo);
+}
+
+int saveImage(const char *filepath, GLFWwindow *w) {
+	int width, height;
+	glfwGetFramebufferSize(w, &width, &height);
+
+	GLsizei nrChannels = 3;
+	GLsizei stride = nrChannels * width;
+	stride += (stride % 4) ? (4 - stride % 4) : 0;
+
+	GLsizei bufferSize = stride * height;
+	std::vector<char> buffer(bufferSize);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadBuffer(GL_FRONT);
+
+	auto start = high_resolution_clock::now();
+	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
+	auto stop = high_resolution_clock::now();
+	auto duration = duration_cast<microseconds>(stop - start);
+	plog_s("glReadPixels took %d us", duration.count());
+
+	stbi_flip_vertically_on_write(true);
+
+	return stbi_write_png(filepath, width, height, nrChannels, buffer.data(), stride);
+}
+
+bool PSIGLRenderer::write_screen_to_file(std::string path) {
+	int retval = saveImage(path.c_str(), _video->get_window());
+	if (retval == 1) {
+		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
+		return true;
+	}
+
+	return false;
 }
 
 void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx) {

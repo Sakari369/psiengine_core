@@ -1,40 +1,8 @@
 #include "PSIVideo.h"
 
-#include "ext/stb_image_write.h"
-
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
 const GLint PSIVideo::DEF_MSAA_SAMPLES = 8;
-
-int saveImage(const char *filepath, GLFWwindow *w) {
-	int width, height;
-	glfwGetFramebufferSize(w, &width, &height);
-
-	GLsizei nrChannels = 3;
-	GLsizei stride = nrChannels * width;
-	stride += (stride % 4) ? (4 - stride % 4) : 0;
-
-	GLsizei bufferSize = stride * height;
-	std::vector<char> buffer(bufferSize);
-
-	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadBuffer(GL_FRONT);
-	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
-
-	stbi_flip_vertically_on_write(true);
-
-	return stbi_write_png(filepath, width, height, nrChannels, buffer.data(), stride);
-}
-
-bool PSIVideo::write_screen_to_file(std::string path) {
-	int retval = saveImage(path.c_str(), this->_window);
-	if (retval == 1) {
-		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
-		return true;
-	}
-
-	return false;
-}
 
 PSIVideo::~PSIVideo() {
 }
