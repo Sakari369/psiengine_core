@@ -105,7 +105,7 @@ class PSIGLRenderer {
 		}
 
 		// Write current OpenGL buffer to PNG file.
-		bool write_screen_to_file(std::string path);
+		bool write_screen_to_file(std::string path, int format);
 
 	private:
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.

@@ -1,17 +1,26 @@
 #include "PSIGLRenderer.h"
 
-#include "ext/stb_image_write.h"
+#include "ext/qoi.h"
+#include "ext/fpng.h"
 
 using namespace std::chrono;
+
+//#define PROFILE_SAVE_IMAGE true
 
 void PSIGLRenderer::shutdown() {
 	glDeleteFramebuffers(1, &_ctx->main_fbo);
 	glDeleteFramebuffers(1, &_ctx->msaa_fbo);
 }
 
-int saveImage(const char *filepath, GLFWwindow *w) {
-	int width, height;
-	glfwGetFramebufferSize(w, &width, &height);
+enum ImageFormat {
+	PNG = 0,
+	QOI = 1
+};
+
+bool write_image(const char *filepath, ImageFormat format, GLFWwindow *window) {
+	GLint width;
+	GLint height;
+	glfwGetFramebufferSize(window, &width, &height);
 
 	GLsizei nrChannels = 3;
 	GLsizei stride = nrChannels * width;
@@ -23,25 +32,56 @@ int saveImage(const char *filepath, GLFWwindow *w) {
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
 	glReadBuffer(GL_FRONT);
 
+ #ifdef PROFILE_SAVE_IMAGE
 	auto start = high_resolution_clock::now();
+#endif
 	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
+
+ #ifdef PROFILE_SAVE_IMAGE
 	auto stop = high_resolution_clock::now();
 	auto duration = duration_cast<microseconds>(stop - start);
 	plog_s("glReadPixels took %d us", duration.count());
+#endif
 
-	stbi_flip_vertically_on_write(true);
+ #ifdef PROFILE_SAVE_IMAGE
+	start = high_resolution_clock::now();
+#endif
 
-	return stbi_write_png(filepath, width, height, nrChannels, buffer.data(), stride);
-}
-
-bool PSIGLRenderer::write_screen_to_file(std::string path) {
-	int retval = saveImage(path.c_str(), _video->get_window());
-	if (retval == 1) {
-		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
-		return true;
+	bool retval = false;
+	if (format == ImageFormat::PNG) {
+		retval = fpng::fpng_encode_image_to_file(filepath, buffer.data(), (unsigned int)width, (unsigned int)height, 3, 0);
+	} else if (format == ImageFormat::QOI) {
+		qoi_desc desc = {(unsigned int)width, (unsigned int)height, 3, QOI_SRGB};
+		retval = qoi_write(filepath, buffer.data(), &desc) > 0 ? true : false;
 	}
 
-	return false;
+ #ifdef PROFILE_SAVE_IMAGE
+	stop = high_resolution_clock::now();
+	auto duration_ms = duration_cast<milliseconds>(stop - start);
+	plog_s("write_image took %d ms", duration_ms.count());
+#endif
+
+	return retval;
+}
+
+bool PSIGLRenderer::write_screen_to_file(std::string path_basename, int format) {
+	std::string path;
+	std::string file_ext = "";
+
+	if (format == ImageFormat::PNG) {
+		file_ext = ".png";
+	} else if (format == ImageFormat::QOI) {
+		file_ext = ".qoi";
+	}
+
+	path = path_basename + file_ext;
+
+	bool retval = write_image(path.c_str(), (ImageFormat)format, _video->get_window());
+	if (retval == true) {
+		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
+	}
+
+	return retval;
 }
 
 void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx) {
