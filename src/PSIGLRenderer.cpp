@@ -47,9 +47,14 @@ bool write_image(const char *filepath, ImageFormat format, GLFWwindow *window) {
 	start = high_resolution_clock::now();
 #endif
 
+	// Use PNG or QOI target file format ? 
+
 	bool retval = false;
+
+	// PNG with alpha support.
 	if (format == ImageFormat::PNG) {
 		retval = fpng::fpng_encode_image_to_file(filepath, buffer.data(), (unsigned int)width, (unsigned int)height, 3, 0);
+	// QOI, a lossless format that compresses better and quicker than PNG.
 	} else if (format == ImageFormat::QOI) {
 		qoi_desc desc = {(unsigned int)width, (unsigned int)height, 3, QOI_SRGB};
 		retval = qoi_write(filepath, buffer.data(), &desc) > 0 ? true : false;
@@ -78,7 +83,7 @@ bool PSIGLRenderer::write_screen_to_file(std::string path_basename, int format) 
 
 	bool retval = write_image(path.c_str(), (ImageFormat)format, _video->get_window());
 	if (retval == true) {
-		psilog(PSILog::MSG, "Wrote frame to file %s", path.c_str());
+		psilog(PSILog::EXPORT, "Wrote screen frame to %s, format = %s", path.c_str(), file_ext.c_str());
 	}
 
 	return retval;

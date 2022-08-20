@@ -27,23 +27,24 @@ public:
 		DESTROY		=  2,
 		LOGIC		=  2 << 1, // Program logic, logic
 		STATE		=  2 << 2, // State changing
-		MSG		=  2 << 3, // Messages for the user
+		MSG			=  2 << 3, // Messages for the user
 		INPUT		=  2 << 4, // Any input
 		DRAW		=  2 << 5, // Drawing
 		MATH		=  2 << 6, // Calculations
 		OPENGL		=  2 << 7, // OpenGL -specific
 		INIT		=  2 << 8, // Initialization of classes
 		FAIL		=  2 << 9, // When something fails
-		ERR		=  2 << 10, // Errors
+		ERR			=  2 << 10, // Errors
 		LOAD		=  2 << 11, // Loading of objects
 		VIDEO		=  2 << 12, // Related to Window handling and video
 		AUDIO		=  2 << 13, // Audio related
 		TASK		=  2 << 14, // Currently working on task log level .. for easy testing
-		VAL		=  2 << 15, // Printing parameter values
+		VAL			=  2 << 15, // Printing parameter values
 		FREQ		=  2 << 16, // High frequency logging
 		PARSE		=  2 << 17, // Parsing of config files and so on
 		TEXTURE		=  2 << 18, // Texture related stuff
-		LUA		=  2 << 19, // Lua -scripting
+		LUA			=  2 << 19, // Lua -scripting
+		EXPORT		=  2 << 20, // Frame writing to files.
 		ALL          	= (2 << 20) - 1
         };
 
