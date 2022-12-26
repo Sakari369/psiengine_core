@@ -31,19 +31,19 @@ bool PSIVideo::init() {
 	GLFWmonitor *fullscreen_monitor = get_fullscreen_monitor();
 
 	// Get content scaling.
-	GLfloat xscale;
-	GLfloat yscale;
-	glfwGetMonitorContentScale(fullscreen_monitor, &xscale, &yscale);
-	_content_scaling = { xscale, yscale };
-	psilog(PSILog::VIDEO, "monitor content scale = %f x %f", xscale, yscale);
+	glfwGetMonitorContentScale(fullscreen_monitor, &_content_scaling.x, &_content_scaling.y);
+	psilog(PSILog::VIDEO, "monitor content scale = %f x %f", _content_scaling.x, _content_scaling.y);
 
 	// Get resolution for desired monitor.
 	const GLFWvidmode *fullscreen_mode = glfwGetVideoMode(fullscreen_monitor);
 
-	if (is_fullscreen() == true) {
-		glfwWindowHint(GLFW_RED_BITS,     fullscreen_mode->redBits);
-		glfwWindowHint(GLFW_GREEN_BITS,   fullscreen_mode->greenBits);
-		glfwWindowHint(GLFW_BLUE_BITS,	  fullscreen_mode->blueBits);
+	if (!is_fullscreen()) {
+		// If we are not going fullscreen, set the monitor to nullptr in order to create a window.
+		fullscreen_monitor = nullptr;
+	} else {
+		glfwWindowHint(GLFW_RED_BITS, fullscreen_mode->redBits);
+		glfwWindowHint(GLFW_GREEN_BITS, fullscreen_mode->greenBits);
+		glfwWindowHint(GLFW_BLUE_BITS, fullscreen_mode->blueBits);
 		glfwWindowHint(GLFW_REFRESH_RATE, fullscreen_mode->refreshRate);
 
 		// Use the window size we got from the fullscreen monitor.
@@ -51,14 +51,11 @@ bool PSIVideo::init() {
 		_win_size.y = _content_scaling.y * fullscreen_mode->height;
 
 		psilog(PSILog::VIDEO, "Window size got from fullscreen mode = %d x %d", _win_size.x, _win_size.y);
-	} else {
-		// If we are not going fullscreen, set the monitor to nullptr in order to create a window.
-		fullscreen_monitor = nullptr;
 	}
 
 	glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
 
-	_window = glfwCreateWindow(_win_size.x, _win_size.y, _window_title.c_str(), fullscreen_monitor, NULL);	
+	_window = glfwCreateWindow(_win_size.x, _win_size.y, _window_title.c_str(), fullscreen_monitor, NULL);
 	if (_window == nullptr) {
 		psilog_err("Failed creating window");
 		return false;
@@ -68,12 +65,12 @@ bool PSIVideo::init() {
 	glfwMakeContextCurrent(_window);
 
 	// Disable cursor if fullscreen.
-	if (is_fullscreen() == true) {
+	if (is_fullscreen()) {
 		set_cursor_visible(false);
 	}
 
 	// Enable vsync ?
-	if (_vsync == true) {
+	if (_vsync) {
 		glfwSwapInterval(1);
 		psilog(PSILog::VIDEO, "Enabled VSYNC");
 	} else {
@@ -89,7 +86,7 @@ bool PSIVideo::init() {
 	psilog(PSILog::VIDEO, "win_width = %d win_height = %d framebuf_width = %d framebuf_height = %d", _win_size.x, _win_size.y, framebuf_width, framebuf_height);
 
 	glm::ivec2 viewport_size;
-	if (is_fullscreen() == true) {
+	if (is_fullscreen()) {
 		// In fullscreen the monitor scaling affects the framebuffer width and height.
 		viewport_size.x = _win_size.x;
 		viewport_size.y = _win_size.y;
@@ -104,7 +101,7 @@ bool PSIVideo::init() {
 	check_gl_error();
 
 	// Initialize GLEW.
-	if (init_glew() == false) {
+	if (!init_glew()) {
 		return -1;
 	}
 
@@ -113,7 +110,7 @@ bool PSIVideo::init() {
 	print_viewport_dimensions();
 
 	// Show mouse cursor ?
-	if (_cursor_disabled == true) {
+	if (_cursor_disabled) {
 		set_cursor_visible(false);
 	}
 	glfwSetCursorPos(_window, 0, 0);
@@ -266,7 +263,7 @@ void PSIVideo::resize_viewport(GLsizei width, GLsizei height) {
 	psilog(PSILog::VIDEO, "OpenGL viewport size changed to %dx%d, ratio=%f", width, height, ratio);
 }
 
-GLFWmonitor *PSIVideo::get_fullscreen_monitor() {
+GLFWmonitor *PSIVideo::get_fullscreen_monitor() const {
 	int count;
 	GLFWmonitor **monitors = glfwGetMonitors(&count);
 	GLFWmonitor *dest_monitor = nullptr;
