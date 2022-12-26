@@ -62,7 +62,7 @@ GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, con
 					//plog_s("primitive.indices_accessor = %s", primitive.indices.c_str());
 					// Get the indexes accessor 
 					auto indices_accessor_it = scene.accessors.find(primitive.indices);
-      					const tinygltf::Accessor &indices_accessor = indices_accessor_it->second;
+      				const tinygltf::Accessor &indices_accessor = indices_accessor_it->second;
 
 					draw_count = indices_accessor.count;
 					index_type = indices_accessor.componentType;
@@ -103,7 +103,7 @@ GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, con
 						std::string attr_accessor = attribute.second;
 
 						auto accessor_it = scene.accessors.find(attr_accessor);
-      						const tinygltf::Accessor &accessor = accessor_it->second;
+      					const tinygltf::Accessor &accessor = accessor_it->second;
 
 						// At this point we should have all the data to setup the vertex attributes
 						glBindBuffer(GL_ARRAY_BUFFER, buffer_ids[accessor.bufferView]);

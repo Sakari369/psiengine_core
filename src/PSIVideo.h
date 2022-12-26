@@ -35,7 +35,7 @@ class PSIVideo {
 		// Resizes the OpenGL viewport.
 		void resize_viewport(GLsizei width, GLsizei height);
 		// Print available and relevant to us opengl extensions.
-		static void print_opengl_extensions();
+		void print_opengl_extensions();
 		// Get OpenGL version and profile string.
 		std::string get_opengl_version_str();
 
@@ -90,7 +90,7 @@ class PSIVideo {
 			glfwSwapBuffers(_window);
 		}
 
-		static void poll_events() {
+		void poll_events() {
 			glfwPollEvents();
 		}
 
@@ -190,8 +190,8 @@ class PSIVideo {
 		void set_opengl_window_hints();
 
 		// Print currently used MSAA samples.
-		static void print_msaa_samples();
+		void print_msaa_samples();
 
 		// Print viewport dimensions.
-		static void print_viewport_dimensions();
+		void print_viewport_dimensions();
 };

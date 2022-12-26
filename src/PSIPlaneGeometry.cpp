@@ -86,16 +86,6 @@ GeometryDataSharedPtr uniform_plane(GLint rows, GLboolean repeat_texture) {
 			//
 			//   uv3      uv2
 			//
-
-			/*
-			plog_s("cx = %d cy = %d origin.x = %f origin.y = %f", 
-				cx, cy, origin.x, origin.y);
-
-			plog_s("\nq[0] = %s\nq[1] = %s\nq[2] = %s\nq[3] = %s", 
-				GLM_CSTR(quad[0]), GLM_CSTR(quad[1]), GLM_CSTR(quad[2]), GLM_CSTR(quad[3]));
-			plog_s("ub = %f vb = %f", ub, vb);
-				*/
-
 			glm::vec2 uv0, uv1, uv2, uv3;
 
 			// If we want to repeat the same texture on each quad, just generate the same texture coordinates 
@@ -130,13 +120,6 @@ GeometryDataSharedPtr uniform_plane(GLint rows, GLboolean repeat_texture) {
 			data->normals.push_back(tri0_normal);
 			data->normals.push_back(tri1_normal);
 			data->normals.push_back(tri1_normal);
-
-			/*
-			   plog_s("a0 = %s b0 = %s c0 = %s", GLM_CSTR(a0), GLM_CSTR(b0), GLM_CSTR(c0));
-			   plog_s("a1 = %s b1 = %s c1 = %s", GLM_CSTR(a1), GLM_CSTR(b1), GLM_CSTR(c1));
-			   plog_s("tri0Normal = %s", glm::to_string(tri0Normal).c_str());
-			   plog_s("tri1Normal = %s", glm::to_string(tri1Normal).c_str());
-			 */
 
 			// Calculate vertex indexes.
 			vertex_offsets = PSIGeometry::Quad::calc_quad_indexes(quad_index);
