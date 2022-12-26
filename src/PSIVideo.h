@@ -35,7 +35,7 @@ class PSIVideo {
 		// Resizes the OpenGL viewport.
 		void resize_viewport(GLsizei width, GLsizei height);
 		// Print available and relevant to us opengl extensions.
-		void print_opengl_extensions();
+		static void print_opengl_extensions();
 		// Get OpenGL version and profile string.
 		std::string get_opengl_version_str();
 
@@ -44,7 +44,7 @@ class PSIVideo {
 			glfwSwapBuffers(_window);
 		}
 
-		GLfloat get_viewport_aspect_ratio() {
+		GLfloat get_viewport_aspect_ratio() const {
 			return _viewport.aspect_ratio;
 		}
 
@@ -63,14 +63,14 @@ class PSIVideo {
 		void set_msaa_samples(GLint samples) {
 			_msaa_samples = samples;
 		}
-		GLint get_msaa_samples() {
+		GLint get_msaa_samples() const {
 			return _msaa_samples;
 		}
 
 		void set_fullscreen(bool fullscreen) {
 			_fullscreen = fullscreen;
 		}
-		bool is_fullscreen() {
+		bool is_fullscreen() const {
 			return _fullscreen;
 		}
 
@@ -82,15 +82,15 @@ class PSIVideo {
 			return _viewport;
 		}
 
-		glm::ivec2 get_viewport_size() {
-			return glm::ivec2(_viewport.size.w, _viewport.size.h);
+		glm::ivec2 get_viewport_size() const {
+			return {_viewport.size.w, _viewport.size.h};
 		}
 
 		void flip() {
 			glfwSwapBuffers(_window);
 		}
 
-		void poll_events() {
+		static void poll_events() {
 			glfwPollEvents();
 		}
 
@@ -110,13 +110,29 @@ class PSIVideo {
 		}
 
 		void set_cursor_visible(bool visible) {
-			GLint enabled = (visible == true) ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED;
-			glfwSetInputMode(_window, GLFW_CURSOR, enabled);
+			GLint cursorMode;
+			if (visible) {
+				cursorMode = GLFW_CURSOR_NORMAL;
+			} else {
+				cursorMode = GLFW_CURSOR_DISABLED;
+			}
+			glfwSetInputMode(_window, GLFW_CURSOR, cursorMode);
+
+			_mouse_locked = visible;
+		}
+
+		void lock_mouse(bool locked) {
+			_mouse_locked = locked;
+			set_cursor_visible(_mouse_locked);
+		}
+
+		bool is_mouse_locked() const {
+			return _mouse_locked;
 		}
 
 		bool is_cursor_visible() {
 			GLint mode = glfwGetInputMode(_window, GLFW_CURSOR);
-			return mode == GLFW_CURSOR_NORMAL ? true : false;
+			return mode == GLFW_CURSOR_NORMAL;
 		}
 
 		// Get monitor scaling factors for current fullscreen monitor.
@@ -125,29 +141,39 @@ class PSIVideo {
 	private:
 		// Window object.
 		GLFWwindow *_window;
+
 		// Viewport dimensions.
 		dimensions _viewport;
+
 		// Window size.
 		glm::ivec2 _win_size = { 0.0f, 0.0f };
-		// Window size.
 
 		// Multisampling samples.
 		GLint _msaa_samples = 0;
+
 		// Create window in fullscreen ?
 		bool _fullscreen = false;
+
 		// Wait on vsync when flipping video ?
 		bool _vsync = false;
+
 		// Show cursor ?
 		bool _cursor_disabled = false;
+
 		// Selected monitor id.
 		std::string _monitor_id;
+
 		// Currently selected monitor index.
 		GLint _monitor_index = 0;
+
 		// Window title string.
 		std::string _window_title;
 
 		// Monitor content scaling factors, these are eg. 2.0 on HiDPI displays.
 		glm::vec2 _content_scaling = { 1.0f, 1.0f };
+
+		// Is the mouse locked inside the window ?
+		bool _mouse_locked = false;
 
 		// Called on GLFW error.
 		static void error_callback(int error, const char *desc) {
@@ -155,7 +181,7 @@ class PSIVideo {
 		}
 
 		// Get current fullscreen monitor.
-		GLFWmonitor *get_fullscreen_monitor();
+		GLFWmonitor *get_fullscreen_monitor() const;
 
 		// Initialize opengl extensions loader.
 		bool init_glew();
@@ -164,8 +190,8 @@ class PSIVideo {
 		void set_opengl_window_hints();
 
 		// Print currently used MSAA samples.
-		void print_msaa_samples();
+		static void print_msaa_samples();
 
 		// Print viewport dimensions.
-		void print_viewport_dimensions();
+		static void print_viewport_dimensions();
 };
