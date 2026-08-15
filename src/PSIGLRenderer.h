@@ -91,12 +91,16 @@ class PSIGLRenderer {
 			return _offscreen_texture;
 		}
 
+		// Framebuffer objects do not exist in Metal -- a render pass names its
+		// attachments directly. These stay because they are bound to Lua
+		// (LuaAPI.cpp:542-543), but there is no handle to hand back; use
+		// get_offscreen_texture() instead. No shipped script calls either.
 		GLuint get_offscreen_fbo() {
-			return _offscreen_fbo;
+			return 0;
 		}
 
 		GLuint get_offscreen_depth_buffer() {
-			return _offscreen_depth_buffer;
+			return 0;
 		}
 
 		// Store reference to the PSIVideo instance.

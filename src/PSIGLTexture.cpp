@@ -109,6 +109,51 @@ bool PSIGLTexture::create_texture(GLint width, GLint height, GLuint face_count) 
 	return true;
 }
 
+bool PSIGLTexture::create_render_target(GLint width, GLint height) {
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		psilog_err("No Metal device when creating render target");
+		return false;
+	}
+	if (width <= 0 || height <= 0) {
+		return false;
+	}
+
+	if (_texture != nullptr) {
+		_texture->release();
+		_texture = nullptr;
+	}
+
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType(MTL::TextureType2D);
+	// Must match PSIMetalContext::color_format(): pipelines bake the colour
+	// attachment format in, so an offscreen target in another format would need
+	// a second pipeline per shader.
+	desc->setPixelFormat(PSI_G::metal_ctx->color_format());
+	desc->setWidth(static_cast<NS::UInteger>(width));
+	desc->setHeight(static_cast<NS::UInteger>(height));
+	desc->setMipmapLevelCount(1);
+	desc->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+	desc->setStorageMode(MTL::StorageModePrivate);
+
+	_texture = PSI_G::metal_ctx->device()->newTexture(desc);
+	desc->release();
+
+	if (_texture == nullptr) {
+		psilog_err("Failed creating %dx%d render target", width, height);
+		return false;
+	}
+
+	_id = next_texture_id();
+	_target = GL_TEXTURE_2D;
+	_has_mipmaps = false;
+	set_size(glm::vec2(width, height));
+	rebuild_sampler();
+
+	psilog(PSILog::TEXTURE, "Created %dx%d render target, id = %d", width, height, _id);
+
+	return true;
+}
+
 void PSIGLTexture::upload_image(const unsigned char *pixels, GLint width, GLint height,
                                 GLint channels, GLuint slice) {
 	if (_texture == nullptr || pixels == nullptr) {

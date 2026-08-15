@@ -51,6 +51,14 @@ void PSIMetalContext::shutdown() {
 		_msaa_texture->release();
 		_msaa_texture = nullptr;
 	}
+	if (_offscreen_depth != nullptr) {
+		_offscreen_depth->release();
+		_offscreen_depth = nullptr;
+	}
+	if (_offscreen_msaa != nullptr) {
+		_offscreen_msaa->release();
+		_offscreen_msaa = nullptr;
+	}
 	if (_depth_state_on != nullptr) {
 		_depth_state_on->release();
 		_depth_state_on = nullptr;
@@ -309,23 +317,27 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	}
 
 	if (_frame_started) {
-		// Second render() in the same frame. Close the current pass and start a
-		// fresh one on the same drawable -- see the note in the header.
+		// Second pass in the same frame. Close the current one and start a fresh
+		// one -- see the note in the header.
 		end_encoding();
 	} else {
 		dispatch_semaphore_wait(_frame_sem, DISPATCH_TIME_FOREVER);
-
-		CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
-		_drawable = layer->nextDrawable();
-		if (_drawable == nullptr) {
-			// Occluded or minimized -- nothing to draw into. Release the frame
-			// slot we just took so we do not leak it.
-			dispatch_semaphore_signal(_frame_sem);
-			return nullptr;
-		}
-
 		_cmd = _queue->commandBuffer();
 		_frame_started = true;
+	}
+
+	// Acquire the drawable lazily, and only once per frame. It may already be
+	// held (a second render() call) or still be null because the frame was
+	// opened by an offscreen pass that never needed one.
+	if (_drawable == nullptr) {
+		CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
+		_drawable = layer->nextDrawable();
+
+		if (_drawable == nullptr) {
+			// Occluded or minimized -- nothing to draw into. present() still
+			// owns the frame slot and will commit and release it.
+			return nullptr;
+		}
 	}
 
 	MTL::RenderPassDescriptor *pass = MTL::RenderPassDescriptor::alloc()->init();
@@ -386,6 +398,129 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	return _encoder;
 }
 
+bool PSIMetalContext::ensure_offscreen_targets(glm::ivec2 size) {
+	if (_device == nullptr || size.x <= 0 || size.y <= 0) {
+		return false;
+	}
+	if (size == _offscreen_size && _offscreen_depth != nullptr) {
+		return true;
+	}
+
+	if (_offscreen_depth != nullptr) {
+		_offscreen_depth->release();
+		_offscreen_depth = nullptr;
+	}
+	if (_offscreen_msaa != nullptr) {
+		_offscreen_msaa->release();
+		_offscreen_msaa = nullptr;
+	}
+
+	const bool multisampled = _msaa_samples > 1;
+
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType(multisampled ? MTL::TextureType2DMultisample : MTL::TextureType2D);
+	desc->setSampleCount(static_cast<NS::UInteger>(_msaa_samples));
+	desc->setPixelFormat(depth_format());
+	desc->setWidth(static_cast<NS::UInteger>(size.x));
+	desc->setHeight(static_cast<NS::UInteger>(size.y));
+	desc->setUsage(MTL::TextureUsageRenderTarget);
+	desc->setStorageMode(MTL::StorageModePrivate);
+	_offscreen_depth = _device->newTexture(desc);
+	desc->release();
+
+	if (_offscreen_depth == nullptr) {
+		psilog_err("Failed creating offscreen depth target %dx%d", size.x, size.y);
+		return false;
+	}
+
+	if (multisampled) {
+		MTL::TextureDescriptor *cd = MTL::TextureDescriptor::alloc()->init();
+		cd->setTextureType(MTL::TextureType2DMultisample);
+		cd->setSampleCount(static_cast<NS::UInteger>(_msaa_samples));
+		cd->setPixelFormat(color_format());
+		cd->setWidth(static_cast<NS::UInteger>(size.x));
+		cd->setHeight(static_cast<NS::UInteger>(size.y));
+		cd->setUsage(MTL::TextureUsageRenderTarget);
+		cd->setStorageMode(MTL::StorageModePrivate);
+		_offscreen_msaa = _device->newTexture(cd);
+		cd->release();
+
+		if (_offscreen_msaa == nullptr) {
+			psilog_err("Failed creating offscreen MSAA target %dx%d", size.x, size.y);
+			return false;
+		}
+	}
+
+	_offscreen_size = size;
+	psilog(PSILog::INIT, "Offscreen targets ready at %dx%d", size.x, size.y);
+
+	return true;
+}
+
+MTL::RenderCommandEncoder *PSIMetalContext::begin_offscreen_frame(MTL::Texture *target,
+                                                                  const glm::vec4 &clear_color) {
+	if (_device == nullptr || target == nullptr) {
+		return nullptr;
+	}
+
+	glm::ivec2 size(static_cast<int>(target->width()), static_cast<int>(target->height()));
+	if (!ensure_offscreen_targets(size)) {
+		return nullptr;
+	}
+
+	if (_frame_started) {
+		// Second pass this frame; close the previous one and reuse the command
+		// buffer, as the on-screen path does.
+		end_encoding();
+	} else {
+		dispatch_semaphore_wait(_frame_sem, DISPATCH_TIME_FOREVER);
+		_cmd = _queue->commandBuffer();
+		_frame_started = true;
+		// No drawable: present() will commit without presenting.
+		_drawable = nullptr;
+	}
+
+	MTL::RenderPassDescriptor *pass = MTL::RenderPassDescriptor::alloc()->init();
+
+	MTL::RenderPassColorAttachmentDescriptor *color = pass->colorAttachments()->object(0);
+	color->setLoadAction(MTL::LoadActionClear);
+	color->setClearColor(MTL::ClearColor::Make(clear_color.r, clear_color.g,
+	                                           clear_color.b, clear_color.a));
+	if (_offscreen_msaa != nullptr) {
+		color->setTexture(_offscreen_msaa);
+		color->setResolveTexture(target);
+		color->setStoreAction(MTL::StoreActionMultisampleResolve);
+	} else {
+		color->setTexture(target);
+		color->setStoreAction(MTL::StoreActionStore);
+	}
+
+	MTL::RenderPassDepthAttachmentDescriptor *depth = pass->depthAttachment();
+	depth->setTexture(_offscreen_depth);
+	depth->setLoadAction(MTL::LoadActionClear);
+	depth->setStoreAction(MTL::StoreActionDontCare);
+	depth->setClearDepth(1.0);
+
+	_encoder = _cmd->renderCommandEncoder(pass);
+	pass->release();
+
+	if (_encoder == nullptr) {
+		psilog_err("Failed creating offscreen render encoder");
+		return nullptr;
+	}
+
+	_encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+	_encoder->setViewport(MTL::Viewport{
+		0.0, 0.0,
+		static_cast<double>(size.x), static_cast<double>(size.y),
+		0.0, 1.0
+	});
+	set_depth_test_enabled(true);
+	_current_shader = nullptr;
+
+	return _encoder;
+}
+
 void PSIMetalContext::end_encoding() {
 	if (_encoder != nullptr) {
 		_encoder->endEncoding();
@@ -400,7 +535,10 @@ void PSIMetalContext::present() {
 
 	end_encoding();
 
-	_cmd->presentDrawable(_drawable);
+	// An offscreen frame has no drawable; it still needs committing.
+	if (_drawable != nullptr) {
+		_cmd->presentDrawable(_drawable);
+	}
 
 	// Release the frame slot once the GPU is actually done with this frame.
 	dispatch_semaphore_t sem = _frame_sem;

@@ -131,6 +131,11 @@ class PSIGLTexture {
 	MTL::Texture *get_metal_texture() const { return _texture; }
 	MTL::SamplerState *get_sampler() const { return _sampler; }
 
+	// Allocate this texture as a colour render target that can also be sampled.
+	// Used by PSIGLRenderer::init_offscreen_texture(); must be the swapchain's
+	// pixel format, since render pipelines bake that in.
+	bool create_render_target(GLint width, GLint height);
+
 	private:
 	// Allocate the MTLTexture for the current size/format/target.
 	bool create_texture(GLint width, GLint height, GLuint face_count);

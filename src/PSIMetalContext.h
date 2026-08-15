@@ -49,6 +49,18 @@ class PSIMetalContext {
 		// or minimized); callers must skip drawing in that case.
 		MTL::RenderCommandEncoder *begin_frame(const glm::vec4 &clear_color);
 
+		// Begin a pass that renders into `target` instead of the drawable.
+		//
+		// The target must be BGRA8Unorm and the pass uses the same sample count
+		// as the on-screen one, because Metal bakes both into every render
+		// pipeline -- differing here would mean compiling a second pipeline
+		// variant per shader.
+		//
+		// present() still ends and commits the frame; it simply has no drawable
+		// to present.
+		MTL::RenderCommandEncoder *begin_offscreen_frame(MTL::Texture *target,
+		                                                 const glm::vec4 &clear_color);
+
 		// Ends encoding, presents the drawable and commits. Safe to call when no
 		// frame was begun -- a script that calls flip() without render() just
 		// gets a no-op rather than a stall.
@@ -159,6 +171,13 @@ class PSIMetalContext {
 		// _drawable_size is _logical_size * _supersample.
 		int _supersample = 1;
 		glm::ivec2 _logical_size = glm::ivec2(0, 0);
+
+		// Depth (and MSAA colour) targets for offscreen passes, allocated lazily
+		// to match whatever texture is being rendered into.
+		MTL::Texture *_offscreen_depth = nullptr;
+		MTL::Texture *_offscreen_msaa = nullptr;
+		glm::ivec2 _offscreen_size = glm::ivec2(0, 0);
+		bool ensure_offscreen_targets(glm::ivec2 size);
 
 		// Precompiled shader library, loaded lazily.
 		MTL::Library *_shader_library = nullptr;

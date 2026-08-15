@@ -8,8 +8,8 @@ using namespace std::chrono;
 //#define PROFILE_SAVE_IMAGE true
 
 void PSIGLRenderer::shutdown() {
-	glDeleteFramebuffers(1, &_ctx->main_fbo);
-	glDeleteFramebuffers(1, &_ctx->msaa_fbo);
+	// Metal resources are owned by PSIMetalContext, which PSIVideo tears down.
+	_offscreen_texture = nullptr;
 }
 
 enum ImageFormat {
@@ -121,36 +121,20 @@ void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderCont
 }
 
 GLint PSIGLRenderer::init_offscreen_texture(glm::ivec2 size) {
-	// Generate the framebuffer object for the offscreen rendering.
-	glGenFramebuffers(1, &_offscreen_fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, _offscreen_fbo);
-
-	// Generate the texture we are going to render offscreen to.
+	// Metal has no framebuffer objects: a render pass names its attachments
+	// directly, so this only has to allocate the colour target. The matching
+	// depth (and MSAA) attachments are created by PSIMetalContext when the
+	// offscreen pass begins, sized to this texture.
 	_offscreen_texture = PSIGLTexture::create();
-	_offscreen_texture->set_format(GL_RGB);
-
-	// Set size and initialize.
-	_offscreen_texture->set_size(size);
-	_offscreen_texture->init();
-	_offscreen_texture->set_sample_mode(PSIGLTexture::TexSampleMode::NEAREST);
-
-	// Generate depth buffer.
-	glGenRenderbuffers(1, &_offscreen_depth_buffer);
-	glBindRenderbuffer(GL_RENDERBUFFER, _offscreen_depth_buffer);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, size.x, size.y);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, _offscreen_depth_buffer);
-
-	// Set texture as color attachment #0.
-	glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, _offscreen_texture->get_id(), 0);
-
-	// Set the list of draw buffers.
-	GLenum draw_buffers[1] = {GL_COLOR_ATTACHMENT0};
-	glDrawBuffers(1, draw_buffers); // "1" is the size of draw_buffers.
-
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-		printf("Failed initializing offscreen framebuffer");
+	if (!_offscreen_texture->create_render_target(size.x, size.y)) {
+		psilog_err("Failed initializing offscreen render target");
+		_offscreen_texture = nullptr;
 		return -1;
 	}
+
+	_offscreen_texture->set_sample_mode(PSIGLTexture::TexSampleMode::NEAREST);
+
+	psilog(PSILog::INIT, "Offscreen render target ready at %dx%d", size.x, size.y);
 
 	return 0;
 }
@@ -159,31 +143,22 @@ GLint PSIGLRenderer::init() {
 	// Create our rendering context.
 	_ctx = PSIRenderContext::create();
 
-	glEnable(GL_DEPTH_TEST);
-	glDepthFunc(GL_LESS);
-	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-
-	if (_msaa_samples > 1) {
-		glEnable(GL_MULTISAMPLE);
-	}
-
-	if (_cull_mode != CullMode::DISABLED) {
-		glEnable(GL_CULL_FACE);
-		GLenum face = _cull_mode == CullMode::BACK ? GL_BACK : GL_FRONT;
-		glCullFace(face);
-	}
+	// No global render state to set up here any more.
+	//
+	// Depth testing, culling, blending and multisampling were all global GL
+	// switches flipped once at startup. In Metal depth and blending are baked
+	// into state objects and pipelines, and culling lives on the encoder, so
+	// they are applied per frame in render() and per shader in compile().
+	// Cubemap seamless filtering is always on.
+	//
+	// The main_fbo/msaa_fbo framebuffer objects are gone too; they were
+	// generated and deleted but never actually bound.
 
 	// Projection, model and view matrixes
 	// Set up as identity as default.
 	_ctx->projection.push(glm::mat4(1.0f));
 	_ctx->model.push(glm::mat4(1.0f));
 	_ctx->view.push(glm::mat4(1.0f));
-
-	// Main and MSAA frame buffer objects.
-	glGenFramebuffers(1, &_ctx->main_fbo);
-	glGenFramebuffers(1, &_ctx->msaa_fbo);
-
-	check_gl_error();
 
 	return 0;
 }
@@ -235,7 +210,15 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 	if (_metal_ctx == nullptr) {
 		return;
 	}
-	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_frame(ctx->bg_color);
+	// Render into the offscreen texture, or into the window's drawable.
+	MTL::RenderCommandEncoder *encoder = nullptr;
+	if (scene->get_render_to_texture() == true && _offscreen_texture != nullptr) {
+		encoder = _metal_ctx->begin_offscreen_frame(
+			_offscreen_texture->get_metal_texture(), ctx->bg_color);
+	} else {
+		encoder = _metal_ctx->begin_frame(ctx->bg_color);
+	}
+
 	if (encoder == nullptr) {
 		return;
 	}
@@ -262,19 +245,10 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 		encoder->setTriangleFillMode(MTL::TriangleFillModeFill);
 	}
 
-	// TODO(M5): render-to-texture. The GL path bound _offscreen_fbo here; under
-	// Metal this becomes a render pass targeting the offscreen texture.
-	if (scene->get_render_to_texture() == true) {
-		psilog(PSILog::FREQ, "render-to-texture not implemented on Metal yet");
-	}
-
-	if (_blending_enabled) {
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	}
-	if (_wireframe) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	}
+	// Blending is part of the pipeline state now, set once per shader in
+	// PSIGLShader::compile() with the same SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+	// equation this used to enable per frame. Wireframe is handled by the
+	// setTriangleFillMode() call above.
 
 	// Store the camera in our context.
 	// This way the objects have access to it via the context.
@@ -300,12 +274,9 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 		ctx->view.pop();
 	ctx->projection.pop();
 
-	if (_wireframe == true) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	}
-	if (_blending_enabled == true) {
-		glDisable(GL_BLEND);
-	}
+	// Nothing to restore: the GL path had to switch blending and polygon mode
+	// back off because they were global state. Encoder state does not outlive
+	// the pass, and the next begin_frame() sets everything again.
 
 	//psilog(PSILog::FREQ, "Scene rendered");
 }
