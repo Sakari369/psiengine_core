@@ -258,17 +258,45 @@ bool PSIMetalContext::create_depth_texture(glm::ivec2 size) {
 	return true;
 }
 
-void PSIMetalContext::resize(glm::ivec2 drawable_size) {
-	if (drawable_size.x <= 0 || drawable_size.y <= 0) {
-		return;
+void PSIMetalContext::set_supersample_factor(int factor) {
+	if (factor < 1) {
+		factor = 1;
 	}
-	if (drawable_size == _drawable_size && _depth_texture != nullptr) {
+	if (factor == _supersample) {
 		return;
 	}
 
-	_drawable_size = drawable_size;
-	PSIMetal::set_layer_drawable_size(_layer, drawable_size.x, drawable_size.y);
-	create_depth_texture(drawable_size);
+	_supersample = factor;
+	psilog(PSILog::INIT, "Supersampling set to %dx", _supersample);
+
+	// Re-apply at the new factor.
+	glm::ivec2 logical = _logical_size;
+	_logical_size = glm::ivec2(0, 0);
+	resize(logical);
+}
+
+void PSIMetalContext::resize(glm::ivec2 logical_size) {
+	if (logical_size.x <= 0 || logical_size.y <= 0) {
+		return;
+	}
+	if (logical_size == _logical_size && _depth_texture != nullptr) {
+		return;
+	}
+
+	_logical_size = logical_size;
+
+	// Draw at supersample^2 the pixel count; the layer minifies it back to the
+	// window on composite, which is where the extra antialiasing comes from.
+	_drawable_size = logical_size * _supersample;
+
+	PSIMetal::set_layer_drawable_size(_layer, _drawable_size.x, _drawable_size.y);
+	create_depth_texture(_drawable_size);
+
+	if (_supersample > 1) {
+		psilog(PSILog::INIT, "Rendering at %dx%d for a %dx%d window (%dx supersampled)",
+		       _drawable_size.x, _drawable_size.y,
+		       logical_size.x, logical_size.y, _supersample);
+	}
 }
 
 void PSIMetalContext::set_vsync(bool enabled) {

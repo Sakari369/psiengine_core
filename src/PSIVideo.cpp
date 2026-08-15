@@ -111,6 +111,19 @@ bool PSIVideo::init() {
 	// Report back what the device actually supported.
 	_msaa_samples = _metal_ctx->get_msaa_samples();
 
+	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
+	// to get edges smoother than multisampling alone can manage.
+	// PSI_SUPERSAMPLE=1 turns it off if the fill rate cost matters.
+	int supersample = 2;
+	const char *ss_env = getenv("PSI_SUPERSAMPLE");
+	if (ss_env != nullptr) {
+		int parsed = atoi(ss_env);
+		if (parsed >= 1 && parsed <= 4) {
+			supersample = parsed;
+		}
+	}
+	_metal_ctx->set_supersample_factor(supersample);
+
 	_metal_ctx->set_vsync(_vsync);
 	if (_vsync) {
 		psilog(PSILog::VIDEO, "Enabled VSYNC");

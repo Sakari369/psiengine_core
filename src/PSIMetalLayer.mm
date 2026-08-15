@@ -43,6 +43,13 @@ void *attach_metal_layer(GLFWwindow *window, void *mtl_device, double contents_s
 	layer.framebufferOnly = YES;
 	layer.contentsScale = contents_scale;
 
+	// When the drawable is larger than the layer's bounds (supersampling), this
+	// is the filter used to bring it back down. Linear gives a proper box
+	// average; the default nearest would throw away the extra samples and make
+	// supersampling pointless.
+	layer.minificationFilter = kCAFilterLinear;
+	layer.magnificationFilter = kCAFilterLinear;
+
 	// Tag the layer with the DISPLAY's colour space, not sRGB.
 	//
 	// The OpenGL build was never colour managed: values went straight to the

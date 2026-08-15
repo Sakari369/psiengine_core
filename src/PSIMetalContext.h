@@ -71,6 +71,22 @@ class PSIMetalContext {
 		void set_msaa_samples(int samples);
 		int get_msaa_samples() const { return _msaa_samples; }
 
+		// Supersampling factor.
+		//
+		// Apple silicon caps MSAA at 4x for this colour format, which is also
+		// what the OpenGL driver granted, so multisampling alone cannot be
+		// pushed further. Rendering the frame at N times the window size and
+		// letting the layer minify it on composite adds a clean NxN box filter
+		// on top of MSAA -- 2x supersampling plus 4x MSAA gives noticeably
+		// smoother edges than either alone.
+		//
+		// Costs N^2 fill rate and N^2 render target memory. 1 disables it.
+		void set_supersample_factor(int factor);
+		int get_supersample_factor() const { return _supersample; }
+
+		// Size the renderer actually draws at (window size * supersample).
+		glm::ivec2 get_render_size() const { return _drawable_size; }
+
 		MTL::Device *device() const { return _device; }
 		MTL::CommandQueue *queue() const { return _queue; }
 
@@ -138,6 +154,11 @@ class PSIMetalContext {
 		// Null when MSAA is off.
 		MTL::Texture *_msaa_texture = nullptr;
 		int _msaa_samples = 1;
+
+		// Supersampling factor and the window size before it is applied.
+		// _drawable_size is _logical_size * _supersample.
+		int _supersample = 1;
+		glm::ivec2 _logical_size = glm::ivec2(0, 0);
 
 		// Precompiled shader library, loaded lazily.
 		MTL::Library *_shader_library = nullptr;
