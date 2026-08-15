@@ -22,12 +22,12 @@
 
 namespace PSIGLUtils {
 	template <typename T>
-	void print_glm_vec(std::string name, T vec) {
+	void print_glm_vec(const std::string &name, T vec) {
 		std::cout << name << "=" << glm::to_string(vec) << std::endl;
 	}
 
 	template <typename T>
-	void print_vectors_of_glm(std::string name, std::vector<T> vectors) {
+	void print_vectors_of_glm(const std::string &name, std::vector<T> vectors) {
 		std::cout << name << "(" << vectors.size() << ") =" << std::endl;
 		for (T vec : vectors) {
 			std::cout << glm::to_string(vec) << std::endl;
@@ -35,7 +35,7 @@ namespace PSIGLUtils {
 	}
 
 	template <typename T>
-	void print_vectors(std::string name, std::vector<T> vectors) {
+	void print_vectors(const std::string &name, std::vector<T> vectors) {
 		std::cout << name << "(" << vectors.size() << ") =" << "\n";
 		for (T val : vectors) {
 			std::cout << val << ", ";
@@ -48,4 +48,4 @@ namespace PSIGLUtils {
 	GLboolean check_error(const char *file, int line);
 
 	//bool createFullscreenQuadInAsset(PSIRenderObj::render_asset &asset);
-};
+}

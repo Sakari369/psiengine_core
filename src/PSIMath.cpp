@@ -61,14 +61,14 @@ GLfloat angle_rad_between_points(const GLfloat x1, const GLfloat y1,
 	}
 
 	return angle_rad;
-};
+}
 
 glm::vec2 calc_poly_vertex(GLuint num_points, GLfloat radius, GLfloat angle_deg, GLuint vertex_index) {
 	GLfloat angle_rad = glm::radians(angle_deg) + ((TWO_PI / num_points) * vertex_index);
 	GLfloat x = (sin(angle_rad) * radius);
 	GLfloat y = (cos(angle_rad) * radius);
 
-	return glm::vec2(x, y);
+	return {x, y};
 }
 
 glm::vec3 calc_tri_normal(const PSI::triangle &tri) {

@@ -15,7 +15,7 @@ static void ma_audio_data_callback(ma_device *device, void *output, const void *
 	while (pcm_frames_remaining > 0) {
 		ma_uint32 bytes_per_frame = ma_get_bytes_per_frame(device->playback.format, device->playback.channels);
 		void *running_output = OFFSET_PTR(output, (framecount - pcm_frames_remaining) * bytes_per_frame);
-		ma_uint64 decoded_pcm_frame_count = ma_decoder_read_pcm_frames(decoder, running_output, pcm_frames_remaining);
+		ma_uint64 decoded_pcm_frame_count = ma_decoder_read_pcm_frames(decoder, running_output, pcm_frames_remaining, NULL);
 
 		// Loop back to the start if we've reached the end. 
 		if (PSIAudio::m_loop == true) {
@@ -48,7 +48,7 @@ bool PSIAudio::init() {
 	// Print available audio devices.
 	psilog(PSILog::AUDIO, "Available audio devices:");
 	for (ma_uint32 device = 0; device < playback_count; ++device) {
-		psilog(PSILog::AUDIO, "Audio device %d = %s\n", device, _playback_infos[device].name);
+		psilog(PSILog::AUDIO, "Audio device %d = %s", device, _playback_infos[device].name);
 	}
 
 	// Create device config.
@@ -56,7 +56,7 @@ bool PSIAudio::init() {
 	// Set playback device to selected id.
 	_config.playback.pDeviceID = &_playback_infos[_selected_device_index].id;
 
-	psilog(PSILog::INIT, "Audio initialized with device '%s'", _playback_infos[_selected_device_index].name);
+	psilog(PSILog::AUDIO, "Audio initialized with device '%s'", _playback_infos[_selected_device_index].name);
 
 	return true;
 }

@@ -193,10 +193,9 @@ PSITextRenderer::unique_data PSITextRenderer::bake_text(const FontAtlasSharedPtr
 	for(int i=0; i<text_len; ++i) {
 		texture_glyph_t *glyph = texture_font_get_glyph(font, &text[i]);
 		if( glyph != nullptr ) {
-			// Calculate glyph position from kerning.
-			GLfloat kerning = 0.0f;
 			if( i > 0 && _offset_glyphs == true) {
-				kerning = texture_glyph_get_kerning(glyph, &text[i-1]);
+				// Calculate glyph position from kerning.
+				GLfloat kerning = texture_glyph_get_kerning(glyph, &text[i-1]);
 				pos.x += kerning;
 				_dimensions.x += kerning;
 			}

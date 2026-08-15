@@ -23,7 +23,7 @@ class PSIAABB {
 
 		// Does this intersect with another AABB ?
 		bool intersect(PSIAABB &aabb);
-		void transform_to_matrix(const glm::mat4 matrix);
+		void transform_to_matrix(glm::mat4 matrix);
 
 		void scale_to(glm::vec3 scaling);
 		void translate_to(glm::vec3 translation);
