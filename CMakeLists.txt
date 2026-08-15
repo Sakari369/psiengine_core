@@ -1,9 +1,10 @@
+cmake_minimum_required (VERSION 3.5...4.3)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.3" CACHE STRING "Minimum macOS deployment target" FORCE)
 project (psicore)
 set(CMAKE_BUILD_TYPE Release)
+set(CONAN_DISABLE_CHECK_COMPILER true)
 #set(CMAKE_BUILD_TYPE Debug)
 
-cmake_minimum_required (VERSION 3.2)
 set(PSI_ARCH "macos_arm64")
 
 # Add module path
@@ -12,9 +13,17 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
 
-add_compile_options(-Wall -std=c++14 -Wno-deprecated)
+# C++17 is required by metal-cpp.
+add_compile_options(-Wall -std=c++17 -Wno-deprecated)
 set(CMAKE_CXX_FLAGS_RELEASE "-Os -ffast-math -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "-Og")
+
+# Metal backend: vendored metal-cpp headers and the system frameworks.
+set(PSI_METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/ext/metal-cpp")
+find_library(METAL_FRAMEWORK Metal REQUIRED)
+find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
 
 message("CMAKE_BUILD_TYPE is ${CMAKE_BUILD_TYPE}")
 message("CMAKE_CXX_FLAGS_DEBUG is ${CMAKE_CXX_FLAGS_DEBUG}")
@@ -36,6 +45,10 @@ set(SOURCES
 	src/ext/miniaudio_impl.cpp
 	src/ext/tiny_gltf_loader.cpp
 	src/ext/fpng.cpp
+	src/ext/metal_cpp_impl.cpp
+	src/PSIMetalContext.cpp
+	# Objective-C++: the only AppKit/CAMetalLayer glue in the engine.
+	src/PSIMetalLayer.mm
 	src/PSIAudio.cpp
 	src/PSIGlobals.cpp 
 	src/PSILog.cpp 
@@ -73,7 +86,8 @@ set(SOURCES
 	src/PSIPrismGeometry.cpp 
 )
 
-set(HEADER_FILES, 
+set(HEADER_FILES
+	src/PSIMetal.h
 	src/PSIAudio.h
 	src/PSIGlobals.h 
 	src/PSILog.h 
@@ -92,7 +106,6 @@ set(HEADER_FILES,
 	src/PSIRenderObj.h 
 	src/PSIRenderMesh.h
 	src/PSIRenderContext.h
-	src/PSITimer.h
 	src/PSIFrameTimer.h
 	src/PSICycler.h 
 	src/PSIScaler.h 
@@ -116,7 +129,17 @@ set(HEADER_FILES,
 )
 	
 add_library(${PROJECT_NAME} STATIC ${SOURCES})
-target_link_libraries(${PROJECT_NAME} ${CONAN_LIBS})
+
+# metal-cpp headers are included as <Metal/Metal.hpp>, so the vendor root goes on
+# the include path. PUBLIC so psiengine picks it up through the core target too.
+target_include_directories(${PROJECT_NAME} PUBLIC ${PSI_METAL_CPP_DIR})
+
+target_link_libraries(${PROJECT_NAME}
+	${CONAN_LIBS}
+	${METAL_FRAMEWORK}
+	${QUARTZCORE_FRAMEWORK}
+	${FOUNDATION_FRAMEWORK}
+	${APPKIT_FRAMEWORK})
 
 install (TARGETS ${PROJECT_NAME} 
 	ARCHIVE DESTINATION ${PSI_CORE_OUTPUT_DIR}

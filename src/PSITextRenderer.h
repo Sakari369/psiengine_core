@@ -14,8 +14,20 @@
 #include "PSIRenderObj.h"
 #include "PSIString.h"
 
-#include "ext/freetype-gl/freetype-gl.h"
+// Only the CPU-side glyph packing API is used here -- texture_atlas_*,
+// texture_font_* and texture_glyph_*. The atlas is rasterized into
+// atlas->data (plain bytes in RAM) and uploaded by PSIGLTexture, so
+// freetype-gl never draws anything itself.
+//
+// Deliberately NOT including the freetype-gl.h umbrella: it pulls in
+// freetype-gl/opengl.h -> <OpenGL/gl.h>, whose declarations collide with the
+// Metal port. texture-atlas.h and texture-font.h are GL-free.
+#include "ext/freetype-gl/texture-atlas.h"
 #include "ext/freetype-gl/texture-font.h"
+
+// freetype-gl.h did exactly this at its line 19; kept so texture_atlas_t and
+// friends stay unqualified here and in PSITimeDisplay.h.
+using namespace ftgl;
 
 class PSIFontAtlas;
 typedef shared_ptr<PSIFontAtlas> FontAtlasSharedPtr;

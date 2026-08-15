@@ -8,7 +8,16 @@ PSIVideo::~PSIVideo() {
 }
 
 void PSIVideo::shutdown() {
-	glfwDestroyWindow(_window);
+	// Tear the Metal context down first: it waits for in-flight frames, which
+	// still reference the layer owned by the window.
+	if (_metal_ctx != nullptr) {
+		_metal_ctx->shutdown();
+		_metal_ctx = nullptr;
+	}
+	if (_window != nullptr) {
+		glfwDestroyWindow(_window);
+		_window = nullptr;
+	}
 }
 
 bool PSIVideo::init() {
@@ -61,23 +70,12 @@ bool PSIVideo::init() {
 		return false;
 	}
 
-	// Set current context.
-	glfwMakeContextCurrent(_window);
-
 	// Disable cursor if fullscreen.
 	if (is_fullscreen()) {
 		set_cursor_visible(false);
 	}
 
-	// Enable vsync ?
-	if (_vsync) {
-		glfwSwapInterval(1);
-		psilog(PSILog::VIDEO, "Enabled VSYNC");
-	} else {
-		psilog(PSILog::VIDEO, "Disabled VSYNC");
-	}
-
-	// Get the actual OpenGL context frame buffer size.
+	// Get the actual drawable size.
 	// This might be different from the viewport On high-DPI displays (eg. retina).
 	GLint framebuf_width;
 	GLint framebuf_height;
@@ -95,15 +93,33 @@ bool PSIVideo::init() {
 		viewport_size.y = framebuf_height;
 	}
 
-	// Resize our GL context size to the actual frame buffer size.
-	resize_viewport(viewport_size.x, viewport_size.y);
-
-	check_gl_error();
-
-	// Initialize GLEW.
-	if (!init_glew()) {
-		return -1;
+	// Create the Metal device, queue and swapchain layer before the first
+	// resize_viewport() so the drawable gets sized along with the viewport.
+	_metal_ctx = PSIMetalContext::create();
+	if (!_metal_ctx->init(_window, viewport_size, _content_scaling.x)) {
+		psilog_err("Failed initializing Metal context");
+		return false;
 	}
+
+	// Publish the context: PSIGLShader/Mesh/Texture are constructed from Lua and
+	// have no other way to reach the device or the active encoder.
+	PSI_G::metal_ctx = _metal_ctx.get();
+
+	// Must happen before any shader compiles: every render pipeline has to
+	// declare the same sample count as the render pass.
+	_metal_ctx->set_msaa_samples(_msaa_samples);
+	// Report back what the device actually supported.
+	_msaa_samples = _metal_ctx->get_msaa_samples();
+
+	_metal_ctx->set_vsync(_vsync);
+	if (_vsync) {
+		psilog(PSILog::VIDEO, "Enabled VSYNC");
+	} else {
+		psilog(PSILog::VIDEO, "Disabled VSYNC");
+	}
+
+	// Resize our drawable to the actual frame buffer size.
+	resize_viewport(viewport_size.x, viewport_size.y);
 
 	// Information.
 	print_msaa_samples();
@@ -118,129 +134,68 @@ bool PSIVideo::init() {
 	return true;
 }
 
-bool PSIVideo::init_glew() {
-	psilog(PSILog::INIT, "Initializing GLEW (ignore possible next INVALID_ENUM error)");
-
-	glewExperimental = GL_TRUE; 
-	GLenum glewError = glewInit();
-
-	if( glewError != GLEW_OK ) {
-		psilog_err("Error initializing GLEW! %s\n", glewGetErrorString(glewError) );
-		return false;
-	}
-
-	// Initializing GLEW causes invalid GL_INVALID_ENUM error probably.
-	// Just get it out of the way and ignore.
-	check_gl_error();
-	psilog(PSILog::OPENGL, "%s", get_opengl_version_str().c_str());
-
-	return true;
-}
-
 void PSIVideo::set_opengl_window_hints() {
-	// Use OpenGL 3.3 core.
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	// No client API: GLFW creates the window, Metal owns the drawing surface via
+	// a CAMetalLayer attached in PSIMetalContext::init().
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-	// TODO: we have to query this info.
+	// MSAA is no longer a window hint. Under Metal it means rendering into a
+	// multisampled texture and resolving into the drawable, which the renderer
+	// sets up. Logged here so the existing startup output does not change.
 	if (_msaa_samples > 1) {
 		psilog(PSILog::VIDEO, "Creating window with %d MSAA samples", _msaa_samples);
-		glfwWindowHint(GLFW_SAMPLES, _msaa_samples);
 	}
-
-	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 }
 
 void PSIVideo::print_viewport_dimensions() {
-	GLint viewport_dimensions[4];
-	GLfloat viewport_width;
-	GLfloat viewport_height;
-
-	glGetIntegerv(GL_VIEWPORT, viewport_dimensions);
-	viewport_width = viewport_dimensions[2];
-	viewport_height = viewport_dimensions[3];
-
-	psilog_err("viewport size = %.2f x %.2f", viewport_width, viewport_height);
+	// Read from our own state now; there is no glGetIntegerv(GL_VIEWPORT) to ask.
+	psilog_err("viewport size = %d x %d", _viewport.size.w, _viewport.size.h);
 }
 
 void PSIVideo::print_msaa_samples() {
-	GLint bufs = 1;
-	GLint samples = 1;
-
-	glGetIntegerv(GL_SAMPLE_BUFFERS, &bufs);
-	glGetIntegerv(GL_SAMPLES, &samples);
-
-	psilog_err("MSAA enabled: using %d buffer(s) with %d sample(s)", bufs, samples);
+	// Reports the count the device actually granted, which may be lower than
+	// requested -- set_msaa_samples() steps down to a supported value.
+	psilog_err("MSAA: using %d sample(s)", _msaa_samples);
 }
 
+// Name kept for the Lua API: every script calls this at startup through
+// psi.internal_status() (assets/scripts/psi/util.lua:16), so it must keep
+// returning a descriptive string.
 std::string PSIVideo::get_opengl_version_str() {
-	// Get OpenGL context info.
-	GLint major = glfwGetWindowAttrib(_window, GLFW_CONTEXT_VERSION_MAJOR);
-	GLint minor = glfwGetWindowAttrib(_window, GLFW_CONTEXT_VERSION_MINOR);
-	GLint profile = glfwGetWindowAttrib(_window, GLFW_OPENGL_PROFILE);
+	if (_metal_ctx == nullptr) {
+		return "Metal: not initialized";
+	}
+	return _metal_ctx->get_device_info_str();
+}
 
-	std::string profile_str;
-	if (major >= 3) {
-		if (profile == GLFW_OPENGL_COMPAT_PROFILE) {
-			profile_str = "GLFW_OPENGL_COMPAT_PROFILE";
-		} else {
-			profile_str = "GLFW_OPENGL_CORE_PROFILE";
+// Name kept for the Lua API (psi.video:print_opengl_extensions()). The GL
+// extension list and the geometry-shader output limits it used to print have no
+// Metal equivalent -- geometry shaders do not exist here at all -- so this
+// reports the device capabilities that actually matter now.
+void PSIVideo::print_opengl_extensions() {
+	if (_metal_ctx == nullptr || _metal_ctx->device() == nullptr) {
+		psilog(PSILog::MSG, "No Metal device");
+		return;
+	}
+
+	MTL::Device *device = _metal_ctx->device();
+
+	psilog(PSILog::MSG, "%s", _metal_ctx->get_device_info_str().c_str());
+	psilog(PSILog::MSG, "unified memory = %s", device->hasUnifiedMemory() ? "yes" : "no");
+	psilog(PSILog::MSG, "max buffer length = %llu MB",
+	       (unsigned long long)(device->maxBufferLength() / (1024 * 1024)));
+	psilog(PSILog::MSG, "max threads per threadgroup = %lu",
+	       (unsigned long)device->maxThreadsPerThreadgroup().width);
+
+	// Closest equivalent of the old GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: Metal
+	// fixes the ceiling at 16 for MTLSamplerDescriptor::maxAnisotropy.
+	psilog(PSILog::MSG, "max sampler anisotropy = 16");
+
+	for (int samples = 2; samples <= 8; samples *= 2) {
+		if (device->supportsTextureSampleCount(samples)) {
+			psilog(PSILog::MSG, "supports %dx MSAA", samples);
 		}
 	}
-
-	std::stringstream ss;
-	ss << "OpenGL version " << major << "." << minor << " (" << profile_str.c_str() << ")";
-
-	return ss.str();
-}
-
-void PSIVideo::print_opengl_extensions() {
-	GLint num_ext = 0;
-	glGetIntegerv(GL_NUM_EXTENSIONS, &num_ext);
-
-#ifndef NO_PRINT_DEBUG
-	psilog(PSILog::MSG, "%d OpenGL Extensions available", num_ext);
-	while(0 < --num_ext) {
-		const unsigned char *extName = glGetStringi(GL_EXTENSIONS, num_ext - 1);
-		psilog(PSILog::MSG, "%s", extName);
-	}
-#endif
-
-	GLint anisotropy_max = 0;
-	glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy_max);
-	psilog(PSILog::MSG, "GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT = %d", anisotropy_max);
-
-	/*
-	The other limit, defined by GL_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS is, in layman's terms, the 
-	total amount of stuff that a single GS invocation can write. 
-
-	It is the total number of output values (a component, in GLSL terms, is a component of a vector. 
-	So a float is one component; a vec3 is 3 components) that a single GS invocation can write to. 
-
-	This is different from GL_MAX_GEOMETRY_OUTPUT_COMPONENTS 
-	(the maximum allowed number of components in out variables). 
-	
-	The total output component is the total number of components + vertices that can be written.
-	*/
-
-	GLint max_geometry_vertices = 0;
-	glGetIntegerv(GL_MAX_GEOMETRY_OUTPUT_VERTICES, &max_geometry_vertices);
-	psilog(PSILog::MSG, "GL_MAX_GEOMETRY_OUTPUT_VERTICES = %d", max_geometry_vertices);
-
-	GLint geometry_vertices_out = 0;
-	glGetIntegerv(GL_GEOMETRY_VERTICES_OUT, &geometry_vertices_out);
-	psilog(PSILog::MSG, "GL_GEOMETRY_VERTICES_OUT = %d", geometry_vertices_out);
-
-	GLint max_geometry_components = 0;
-	glGetIntegerv(GL_MAX_GEOMETRY_OUTPUT_COMPONENTS, &max_geometry_components);
-	psilog(PSILog::MSG, "GL_MAX_GEOMETRY_OUTPUT_COMPONENTS = %d", max_geometry_components);
-
-	GLint max_geometry_total_components = 0;
-	glGetIntegerv(GL_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS, &max_geometry_total_components);
-	psilog(PSILog::MSG, "GL_MAX_GEOMETRY_TOTAL_OUTPUT_COMPONENTS = %d", max_geometry_total_components);
-
-	check_gl_error();
 }
 
 void PSIVideo::resize_viewport(GLsizei width, GLsizei height) {
@@ -251,8 +206,6 @@ void PSIVideo::resize_viewport(GLsizei width, GLsizei height) {
 		height = 1;
 	}
 
-	// Set up viewport.
-	glViewport(0, 0, width, height);
 	ratio = (GLfloat)width / (GLfloat)height;
 
 	// Update internal representation.
@@ -260,7 +213,13 @@ void PSIVideo::resize_viewport(GLsizei width, GLsizei height) {
 	_viewport.size.h = height;
 	_viewport.aspect_ratio = ratio;
 
-	psilog(PSILog::VIDEO, "OpenGL viewport size changed to %dx%d, ratio=%f", width, height, ratio);
+	// Resize the Metal drawable and depth buffer to match. The per-pass viewport
+	// is set by PSIMetalContext::begin_frame().
+	if (_metal_ctx != nullptr) {
+		_metal_ctx->resize(glm::ivec2(width, height));
+	}
+
+	psilog(PSILog::VIDEO, "Viewport size changed to %dx%d, ratio=%f", width, height, ratio);
 }
 
 GLFWmonitor *PSIVideo::get_fullscreen_monitor() const {

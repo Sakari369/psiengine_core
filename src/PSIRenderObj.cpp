@@ -1,4 +1,5 @@
 #include "PSIRenderObj.h"
+#include "PSIMetalContext.h"
 
 PSIRenderObj::PSIRenderObj() {
 }
@@ -19,16 +20,19 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	auto material = get_material();
 	assert(material != nullptr);
 
+	MTL::RenderCommandEncoder *encoder =
+		(PSI_G::metal_ctx != nullptr) ? PSI_G::metal_ctx->encoder() : nullptr;
+
 	// Are we rendering as wireframe ?
 	bool wireframe = (material->get_wireframe() == true) || ctx->wireframe;
-	if (wireframe == true) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	if (wireframe == true && encoder != nullptr) {
+		encoder->setTriangleFillMode(MTL::TriangleFillModeLines);
 	}
 
 	// Should this object be depth tested ?
 	GLboolean disable_depth_test = !is_depth_tested();
-	if (disable_depth_test == true) {
-		glDisable(GL_DEPTH_TEST);
+	if (disable_depth_test == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->set_depth_test_enabled(false);
 	}
 
 	// Check if we should lock the object in place
@@ -63,10 +67,14 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	// Setup texture.
 	auto texture = material->get_texture();
 	if (texture != nullptr) {
-		//psilog(PSILog::FREQ, "Binding texture id = %d", texture->get_id());
-		// Bind texture unit 0.
-		glActiveTexture(GL_TEXTURE0);
-		// Update that we are using texture 0 for the material diffuse.
+		// There is no glActiveTexture equivalent: PSIGLTexture::bind() sets the
+		// texture and its sampler on the encoder at slot 0 directly, matching
+		// [[texture(0)]] / [[sampler(0)]] in the shaders.
+		//
+		// The set_uniform("u_diffuse", 0) below picked the texture unit under
+		// OpenGL. It is kept because Metal reflection reports u_diffuse as a
+		// texture argument and the call is recognised as a no-op, so removing it
+		// would be a behaviour change for no gain.
 		shader->set_uniform("u_diffuse", 0);
 		texture->bind();
 	}
@@ -97,12 +105,12 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		texture->unbind();
 	}
 	// Enable depth test back.
-	if (disable_depth_test == true) {
-		glEnable(GL_DEPTH_TEST);
+	if (disable_depth_test == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->set_depth_test_enabled(true);
 	}
 	// Enable solid rendering.
-	if (wireframe == true) {
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	if (wireframe == true && encoder != nullptr) {
+		encoder->setTriangleFillMode(MTL::TriangleFillModeFill);
 	}
 	if (is_translated == false) {
 		ctx->view.pop();

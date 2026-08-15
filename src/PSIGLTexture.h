@@ -1,6 +1,14 @@
 // PSIEngine Copyright (c) 2021 Sakari Lehtonen <sakari@psitriangle.net>
 //
-// OpenGL texture interface.
+// Texture interface. Metal backend.
+//
+// Public API unchanged: PSIGLTexture is bound to Lua (LuaAPI.cpp:445) and
+// scripts drive it with load_from_file(), bind(), set_sample_mode() and
+// unbind() -- see assets/scripts/game/area.lua:27-29.
+//
+// The TexFormat / TexSampleMode flag values are part of that contract too:
+// assets/scripts/psi/texture.lua mirrors them by hand, so the numbers must not
+// change even though they are no longer GL enums.
 
 #pragma once
 
@@ -18,7 +26,7 @@ typedef shared_ptr<PSIGLTexture> GLTextureSharedPtr;
 class PSIGLTexture {
 	public:
 
-	// OpenGL Texture formats.
+	// Texture formats. Engine-specific flags, not GL enums.
 	enum TexFormat {
 		RGB		= 0x100,
 		RGBA            = 0x200,
@@ -38,7 +46,8 @@ class PSIGLTexture {
 		SRGB		= 0x80000,
 	};
 
-	// OpenGL Texture sample modes.
+	// Texture sample modes. Mirrored in assets/scripts/psi/texture.lua -- keep
+	// the values.
 	enum TexSampleMode {
 		LINEAR       	= 0x000,
 		LINEAR_MIPMAP  	= 0x001,
@@ -57,7 +66,8 @@ class PSIGLTexture {
 		TEX_CUBEMAP	= 1
 	};
 
-	// Format info for generated texture.
+	// Format info for generated texture. Retained for API compatibility;
+	// resolve_pixel_format() is what the Metal path actually uses.
 	struct TexFormatInfo {
 		GLenum format;
 		GLenum internal_format;
@@ -72,7 +82,7 @@ class PSIGLTexture {
 	};
 
 	PSIGLTexture() = default;
-	~PSIGLTexture() = default;
+	~PSIGLTexture();
 
 	static GLTextureSharedPtr create() {
 		return make_shared<PSIGLTexture>();
@@ -81,15 +91,13 @@ class PSIGLTexture {
 	// Initialize a default texture.
 	GLuint init();
 
-	// Bind this texture to our texture id.
-	void bind() {
-		glBindTexture(_target, _id);
-		psilog(PSILog::FREQ, "Bound texture with target = %d, id = %d", _target, _id);
-	}
-	// Unbind this texture.
-	void unbind() {
-		glBindTexture(_target, 0);
-	}
+	// Bind this texture for the next draw.
+	//
+	// OpenGL bound to a global slot that persisted until changed; Metal sets
+	// texture and sampler on the render encoder. Outside a frame (during asset
+	// loading, where the GL code also called bind()) this is a no-op.
+	void bind();
+	void unbind();
 
 	void set_id(GLuint id) { _id = id; }
 	GLuint get_id() { return _id; }
@@ -117,25 +125,41 @@ class PSIGLTexture {
 	void load_from_file(std::string path);
 	// Load all the faces of a cube map and generate cubemap texture.
 	void load_cube_map(std::vector<std::string> texture_paths);
-	// Generate texture id and set active.
+	// Kept for API compatibility; Metal allocates on upload.
 	GLuint gen_texture_id(PSIGLTexture::TexType type);
 
+	MTL::Texture *get_metal_texture() const { return _texture; }
+	MTL::SamplerState *get_sampler() const { return _sampler; }
+
 	private:
-	// Generates a default 2d texture with sane defaults.
-	GLuint gen_2d_texture(GLint format, GLint width, GLint height);
-	// Set texture mipmaps. Mipmaps are generated if generate set to true.
+	// Allocate the MTLTexture for the current size/format/target.
+	bool create_texture(GLint width, GLint height, GLuint face_count);
+	// Upload one image, flipping rows (see the note in the .cpp).
+	void upload_image(const unsigned char *pixels, GLint width, GLint height,
+	                  GLint channels, GLuint slice);
+	// Build the sampler state from the current sample mode.
+	void rebuild_sampler();
+	// Generate mipmaps with a blit encoder.
 	void gen_mipmaps(GLboolean generate);
-	// Get the OpenGL texture format information from the format flags.
+	// Retained for API compatibility.
 	PSIGLTexture::TexFormatInfo get_format_info(GLint format_flags);
 
-	// OpenGL texture id.
+	MTL::Texture *_texture = nullptr;
+	MTL::SamplerState *_sampler = nullptr;
+
+	// Handle for logging and for the Lua-visible get_id().
 	GLuint _id = TexDefs::INVALID_TEX_ID;
-	// OpenGL texture format.
+	// Texture format flags.
 	GLint _format = TexFormat::RGBA;
 	// If samples > 1, generate multisample texture.
 	GLint _samples = 1;
-	// Target which texture is bound to.
+	// GL_TEXTURE_2D or GL_TEXTURE_CUBE_MAP.
 	GLenum _target = GL_TEXTURE_2D;
 	// Dimensions in pixels.
 	glm::vec2 _size = { 0.0f, 0.0f };
+
+	// Current sample mode, so the sampler can be rebuilt when it changes.
+	GLint _sample_mode = TexSampleMode::LINEAR | TexSampleMode::REPEAT;
+	// Whether mipmaps were generated, which decides the sampler's mip filter.
+	bool _has_mipmaps = false;
 };

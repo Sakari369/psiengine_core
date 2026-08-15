@@ -1,297 +1,385 @@
+#include "PSIGLTexture.h"
+#include "PSIMetalContext.h"
+
 #include "ext/stb_image.h"
 
-#include "PSIGLTexture.h"
-#include "PSIGLUtils.h"
+#include <cstring>
+#include <vector>
 
-GLuint PSIGLTexture::init() {
-	assert(_size.x > 0);
-	assert(_size.y > 0);
+namespace {
 
-	GLuint texture_id = gen_2d_texture(_format, _size.x, _size.y);
-	set_id(texture_id);
+GLuint next_texture_id() {
+	static GLuint counter = 0;
+	return ++counter;
+}
 
-	return texture_id;
+} // namespace
+
+PSIGLTexture::~PSIGLTexture() {
+	if (_sampler != nullptr) {
+		_sampler->release();
+		_sampler = nullptr;
+	}
+	if (_texture != nullptr) {
+		_texture->release();
+		_texture = nullptr;
+	}
 }
 
 GLuint PSIGLTexture::gen_texture_id(PSIGLTexture::TexType type) {
-	GLenum target = GL_TEXTURE_2D;
-	if (type == TexType::TEX_2D && get_samples() > 1) {
-		target = GL_TEXTURE_2D_MULTISAMPLE;
-	} else if (type == TexType::TEX_CUBEMAP) {
-		target = GL_TEXTURE_CUBE_MAP;
-	}
-
-	// Set our target.
-	set_target(target);
-
-	// Allocate texture id.
-	GLuint id;
-	glGenTextures(1, &id);
-	set_id(id);
-
-	// Set.
-	glActiveTexture(GL_TEXTURE0);
-
-	check_gl_error();
-
-	return id;
+	set_target(type == TexType::TEX_CUBEMAP ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D);
+	_id = next_texture_id();
+	return _id;
 }
 
+GLuint PSIGLTexture::init() {
+	if (_id == (GLuint)TexDefs::INVALID_TEX_ID) {
+		_id = next_texture_id();
+	}
+	rebuild_sampler();
+	return _id;
+}
+
+// Retained so any caller still asking for GL format info gets something
+// coherent. The Metal path picks MTLPixelFormat directly in create_texture().
 PSIGLTexture::TexFormatInfo PSIGLTexture::get_format_info(GLint format_flags) {
-	// Default type.
-	PSIGLTexture::TexFormatInfo info = { GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE };
+	TexFormatInfo info;
+	info.type = GL_UNSIGNED_BYTE;
 
-	// Figure out internal texture format.
-	switch(format_flags & TexFormat::TYPE_MASK)
-	{
-	case TexFormat::RGB:
+	if ((format_flags & TexFormat::TYPE_MASK) == TexFormat::RGB) {
 		info.format = GL_RGB;
-		break;
-
-	case TexFormat::RGBA:
-		info.format = GL_RGBA; 
-		break;
-
-	case TexFormat::R:
-		info.format = GL_RED; 
-		break;
-
-	case TexFormat::DEPTH: 
-		info.format = GL_DEPTH_COMPONENT; 
-		info.type = GL_FLOAT; 
-		break;
-
-	case TexFormat::DXT1:
-		info.format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
-		break;
-	case TexFormat::DXT3:
-		info.format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
-		break;
-	case TexFormat::DXT5:
-		info.format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-		break;
-
-	default:
-		psilog(PSILog::TEXTURE, "Warning: invalid format flags passed!");
-		break;
+		info.internal_format = GL_RGB;
+	} else {
+		info.format = GL_RGBA;
+		info.internal_format = GL_RGBA;
 	}
-
-	GLboolean is_srgb = false;
-	if (   (format_flags & TexFormat::TYPE_MASK) == TexFormat::RGBA
-	    && (format_flags & TexFormat::SRGB)     != 0) {
-		is_srgb = true;
-	}
-
-	GLboolean is_depth = false;
-	if ( (format_flags & TexFormat::DEPTH) != 0) {
-		is_depth = true;
-	}
-
-	info.internal_format = info.format;
-	if (is_srgb) {
-		info.internal_format = GL_SRGB8_ALPHA8;
-	} else if (is_depth) {
-		info.internal_format = GL_DEPTH_COMPONENT24;
-	}
-
-	psilog(PSILog::TEXTURE, "internal_format = %d format = %d type = %d", info.internal_format, info.format, info.type);
 
 	return info;
 }
 
-GLuint PSIGLTexture::gen_2d_texture(GLint format, GLint width, GLint height) {
-	// Generate the texture and set render target
-	GLuint id = gen_texture_id(TexType::TEX_2D);
-	bind();
+bool PSIGLTexture::create_texture(GLint width, GLint height, GLuint face_count) {
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		psilog_err("No Metal device when creating texture");
+		return false;
+	}
+	if (width <= 0 || height <= 0) {
+		return false;
+	}
 
-	TexFormatInfo fmt = get_format_info(format);
+	if (_texture != nullptr) {
+		_texture->release();
+		_texture = nullptr;
+	}
 
-	// Specify empty multisampled texture ?
-	GLint samples = get_samples();
-	GLenum target = get_target();
-	if (samples > 1) {
-		glTexImage2DMultisample(target, samples, fmt.internal_format, width, height, GL_TRUE);
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+
+	if (face_count == 6) {
+		desc->setTextureType(MTL::TextureTypeCube);
 	} else {
-		glTexImage2D(target, 0, fmt.internal_format, width, height, 0, fmt.format, fmt.type, NULL);
+		desc->setTextureType(MTL::TextureType2D);
 	}
 
-	set_sample_mode(PSIGLTexture::TexSampleMode::REPEAT | PSIGLTexture::TexSampleMode::LINEAR_MIPMAP);
+	// Everything is expanded to 4 channels on upload, so one format covers both
+	// the 3- and 4-channel source images.
+	desc->setPixelFormat(MTL::PixelFormatRGBA8Unorm);
+	desc->setWidth((NS::UInteger)width);
+	desc->setHeight((NS::UInteger)height);
+	desc->setUsage(MTL::TextureUsageShaderRead);
+	desc->setStorageMode(MTL::StorageModeShared);
 
-	GLboolean generate_mipmaps = (GLboolean)(format & TexFormat::GEN_MIPMAPS);
-	gen_mipmaps(generate_mipmaps);
+	// Mip level count must be declared up front, unlike glGenerateMipmap.
+	NS::UInteger levels = 1;
+	GLint dim = (width > height) ? width : height;
+	while (dim > 1) {
+		dim >>= 1;
+		levels++;
+	}
+	desc->setMipmapLevelCount(levels);
 
-	psilog(PSILog::OPENGL, "Generated texture, id=%d (%dx%d), %d sample(s)", id, width, height, samples);
+	_texture = PSI_G::metal_ctx->device()->newTexture(desc);
+	desc->release();
 
-	unbind();
+	if (_texture == nullptr) {
+		psilog_err("Failed creating %dx%d texture", width, height);
+		return false;
+	}
 
-	return id;
+	set_size(glm::vec2(width, height));
+
+	return true;
 }
 
-void PSIGLTexture::set_data(const GLvoid *data) {
-	TexFormatInfo fmt = get_format_info(_format);
-	glTexImage2D(get_target(), 0, fmt.internal_format, _size.x, _size.y, 0, fmt.format, fmt.type, data);
-}
-
-void PSIGLTexture::set_sample_mode(GLint sample_mode) {
-	GLenum target = get_target();
-
-	switch (sample_mode & TexSampleMode::FILTER_MASK) {
-	default:
-	case TexSampleMode::LINEAR:
-		glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		break;
-
-	case TexSampleMode::LINEAR_MIPMAP:
-		glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		if(GL_EXT_texture_filter_anisotropic) {
-			glTexParameteri(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
-		}
-		break;
-
-	case TexSampleMode::NEAREST:
-		glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		if(GL_EXT_texture_filter_anisotropic) {
-			glTexParameteri(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
-		}
-		break;
-
-	case TexSampleMode::ANISOTROPIC:
-		glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		if(GL_EXT_texture_filter_anisotropic) {
-			glTexParameteri(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, TexDefs::DEF_MAX_ANISOTROPY);
-		}
-		break;
-	}
-
-	switch (sample_mode & TexSampleMode::ADDRESS_MASK) {
-	default:
-	case TexSampleMode::REPEAT:
-		glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_REPEAT);
-		if (target == GL_TEXTURE_CUBE_MAP) {
-			glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_REPEAT);
-		}
-
-		break;
-
-	case TexSampleMode::CLAMP:
-		glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		if (target == GL_TEXTURE_CUBE_MAP) {
-			glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-		}
-		break;
-
-	case TexSampleMode::CLAMP_BORDER:
-		glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-		glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-		if (target == GL_TEXTURE_CUBE_MAP) {
-			glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER);
-		}
-		break;
-	}
-
-	check_gl_error();
-}
-
-void PSIGLTexture::gen_mipmaps(GLboolean generate) {
-	GLenum target = get_target();
-	GLint mipmap_count = 0;
-	if (generate == true) {
-		mipmap_count = TexDefs::DEF_MIPMAP_COUNT;
-	}
-
-	// Have to set these parameters anyway.
-	glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
-	glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, mipmap_count);
-
-	// Generate mipmaps.
-	if (mipmap_count > 0) {
-		glGenerateMipmap(target);
-		psilog(PSILog::TEXTURE, "Generated %d mipmap levels", mipmap_count);
-	}
-}
-
-void PSIGLTexture::load_from_file(std::string path) {
-	// Width and height from loaded image.
-	GLint width;
-	GLint height;
-	// Number of color channels from loaded image.
-	GLint channels;
-
-	psilog(PSILog::TEXTURE, "Loading '%s'", path.c_str());
-
-	// Load the image data.
-	unsigned char *image = stbi_load(path.c_str(), &width, &height, &channels, STBI_default);
-
-	// Set the texture image data
-	if (image != nullptr) {
-		GLuint id = gen_texture_id(TexType::TEX_2D);
-		bind();
-		if (id != TexDefs::INVALID_TEX_ID) {
-			// Does the image loaded have RGB or RGBA data in it ?
-			// The generated texture depends on the data format.
-			TexFormat fmt;
-			if (channels == 3) {
-				fmt = TexFormat::RGB;
-			} else {
-				fmt = TexFormat::RGBA;
-			}
-			// Get more detailed info based on channel format.
-			TexFormatInfo fmt_info = get_format_info(fmt);
-			GLenum target = get_target();
-			// Generate 2D texture.
-			glTexImage2D(target, 0, fmt_info.internal_format, width, height, 0, fmt_info.format, fmt_info.type, image);
-
-			psilog(PSILog::TEXTURE, "Loaded '%s' [%dx%d c=%d], id = %d", path.c_str(), width, height, channels, id);
-		} else {
-			stbi_image_free(image);
-			psilog(PSILog::TEXTURE, "Failed allocating texture for file '%s'", path.c_str());
-			return;
-		}
-	} else {
-		psilog(PSILog::TEXTURE, "Failed loading image from '%s'", path.c_str());
+void PSIGLTexture::upload_image(const unsigned char *pixels, GLint width, GLint height,
+                                GLint channels, GLuint slice) {
+	if (_texture == nullptr || pixels == nullptr) {
 		return;
 	}
 
-	stbi_image_free(image);
-	set_sample_mode(PSIGLTexture::TexSampleMode::CLAMP | PSIGLTexture::TexSampleMode::ANISOTROPIC);
-	gen_mipmaps(true);
-	unbind();
-}
+	// Expand to RGBA. Deliberately NOT flipped vertically.
+	//
+	// The usual "OpenGL and Metal disagree about the texture origin" advice does
+	// not apply to this port. Both APIs map texture coordinate 0 to the FIRST row
+	// of uploaded data -- OpenGL calls that row the bottom-left origin and Metal
+	// calls it the top-left, but the array-index-to-coordinate mapping is the
+	// same. With identical bytes and identical UVs, both sample the same texel.
+	//
+	// The engine never called stbi_set_flip_vertically_on_load(), so uploading
+	// stb's rows in order reproduces the OpenGL build exactly. Flipping here
+	// would introduce the very difference it looks like it is preventing.
+	const GLint dst_channels = 4;
+	std::vector<unsigned char> rgba((size_t)width * height * dst_channels);
 
-void PSIGLTexture::load_cube_map(std::vector<std::string> texture_paths) {
-	GLuint id = gen_texture_id(TexType::TEX_CUBEMAP);
-	bind();
+	for (GLint y = 0; y < height; y++) {
+		const unsigned char *src_row = pixels + (size_t)y * width * channels;
+		unsigned char *dst_row = rgba.data() + (size_t)y * width * dst_channels;
 
-	// Width and height from loaded image.
-	GLint width;
-	GLint height;
-	// Number of color channels from loaded image.
-	GLint channels;
+		for (GLint x = 0; x < width; x++) {
+			const unsigned char *s = src_row + (size_t)x * channels;
+			unsigned char *d = dst_row + (size_t)x * dst_channels;
 
-	// Load all the cube map textures.
-	for(GLuint i=0; i<texture_paths.size(); i++) {
-		psilog(PSILog::TEXTURE, "Loading '%s'", texture_paths[i].c_str());
-		unsigned char *image = stbi_load(texture_paths[i].c_str(), &width, &height, &channels, STBI_rgb);
-
-		if (image != nullptr) {
-			// For cubemap textures always use GL_RGB.
-			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
-			stbi_image_free(image);
-			psilog(PSILog::TEXTURE, "Loaded '%s' [%dx%d c=%d]", texture_paths[i].c_str(), width, height, channels);
-		} else {
-			psilog_err("Failed loading image from '%s'", texture_paths[i].c_str());
+			d[0] = s[0];
+			d[1] = (channels > 1) ? s[1] : s[0];
+			d[2] = (channels > 2) ? s[2] : s[0];
+			d[3] = (channels > 3) ? s[3] : 255;
 		}
 	}
 
-	set_sample_mode(PSIGLTexture::TexSampleMode::CLAMP | PSIGLTexture::TexSampleMode::LINEAR_MIPMAP);
-	gen_mipmaps(true);
-	unbind();
+	MTL::Region region = MTL::Region::Make2D(0, 0, (NS::UInteger)width, (NS::UInteger)height);
+	_texture->replaceRegion(region,
+	                        0,
+	                        (NS::UInteger)slice,
+	                        rgba.data(),
+	                        (NS::UInteger)width * dst_channels,
+	                        0);
+}
 
-	psilog(PSILog::TEXTURE, "Loaded cubemap texture with id = %d", id);
-}  
+void PSIGLTexture::set_data(const GLvoid *data) {
+	if (data == nullptr) {
+		return;
+	}
+
+	GLint width = (GLint)_size.x;
+	GLint height = (GLint)_size.y;
+	if (width <= 0 || height <= 0) {
+		psilog_err("set_data() called before the texture size was set");
+		return;
+	}
+
+	// PSITextRenderer uses this to push the freetype-gl glyph atlas, which is
+	// RGB bytes in RAM.
+	GLint channels = ((_format & TexFormat::TYPE_MASK) == TexFormat::RGB) ? 3 : 4;
+
+	if (_texture == nullptr && !create_texture(width, height, 1)) {
+		return;
+	}
+
+	upload_image(static_cast<const unsigned char *>(data), width, height, channels, 0);
+	rebuild_sampler();
+}
+
+void PSIGLTexture::load_from_file(std::string path) {
+	GLint width = 0;
+	GLint height = 0;
+	GLint channels = 0;
+
+	psilog(PSILog::TEXTURE, "Loading '%s'", path.c_str());
+
+	unsigned char *image = stbi_load(path.c_str(), &width, &height, &channels, STBI_default);
+	if (image == nullptr) {
+		psilog_err("Failed loading image from '%s'", path.c_str());
+		return;
+	}
+
+	gen_texture_id(TexType::TEX_2D);
+	set_format(channels == 3 ? TexFormat::RGB : TexFormat::RGBA);
+
+	if (!create_texture(width, height, 1)) {
+		stbi_image_free(image);
+		return;
+	}
+
+	upload_image(image, width, height, channels, 0);
+	stbi_image_free(image);
+
+	psilog(PSILog::TEXTURE, "Loaded '%s' [%dx%d c=%d], id = %d",
+	       path.c_str(), width, height, channels, _id);
+
+	set_sample_mode(TexSampleMode::CLAMP | TexSampleMode::ANISOTROPIC);
+	gen_mipmaps(true);
+}
+
+void PSIGLTexture::load_cube_map(std::vector<std::string> texture_paths) {
+	gen_texture_id(TexType::TEX_CUBEMAP);
+	set_format(TexFormat::RGB);
+
+	GLint width = 0;
+	GLint height = 0;
+	GLint channels = 0;
+
+	for (GLuint i = 0; i < texture_paths.size() && i < 6; i++) {
+		psilog(PSILog::TEXTURE, "Loading '%s'", texture_paths[i].c_str());
+
+		unsigned char *image = stbi_load(texture_paths[i].c_str(), &width, &height,
+		                                 &channels, STBI_rgb);
+		if (image == nullptr) {
+			psilog_err("Failed loading image from '%s'", texture_paths[i].c_str());
+			continue;
+		}
+
+		// All six faces share one cube texture, allocated from the first face.
+		if (_texture == nullptr && !create_texture(width, height, 6)) {
+			stbi_image_free(image);
+			return;
+		}
+
+		upload_image(image, width, height, 3, i);
+		stbi_image_free(image);
+
+		psilog(PSILog::TEXTURE, "Loaded '%s' [%dx%d c=%d]",
+		       texture_paths[i].c_str(), width, height, channels);
+	}
+
+	set_sample_mode(TexSampleMode::CLAMP | TexSampleMode::LINEAR_MIPMAP);
+	gen_mipmaps(true);
+
+	psilog(PSILog::TEXTURE, "Loaded cubemap texture with id = %d", _id);
+}
+
+void PSIGLTexture::set_sample_mode(GLint sample_mode) {
+	_sample_mode = sample_mode;
+	rebuild_sampler();
+}
+
+void PSIGLTexture::rebuild_sampler() {
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		return;
+	}
+
+	if (_sampler != nullptr) {
+		_sampler->release();
+		_sampler = nullptr;
+	}
+
+	MTL::SamplerDescriptor *desc = MTL::SamplerDescriptor::alloc()->init();
+
+	// Same mask arithmetic as the GL version, so the flag values that
+	// assets/scripts/psi/texture.lua mirrors keep behaving identically.
+	switch (_sample_mode & TexSampleMode::FILTER_MASK) {
+	default:
+	case TexSampleMode::LINEAR:
+		desc->setMinFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMagFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMipFilter(MTL::SamplerMipFilterNotMipmapped);
+		break;
+
+	case TexSampleMode::LINEAR_MIPMAP:
+		desc->setMinFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMagFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMipFilter(_has_mipmaps ? MTL::SamplerMipFilterLinear
+		                                : MTL::SamplerMipFilterNotMipmapped);
+		desc->setMaxAnisotropy(1);
+		break;
+
+	case TexSampleMode::NEAREST:
+		desc->setMinFilter(MTL::SamplerMinMagFilterNearest);
+		desc->setMagFilter(MTL::SamplerMinMagFilterNearest);
+		desc->setMipFilter(MTL::SamplerMipFilterNotMipmapped);
+		desc->setMaxAnisotropy(1);
+		break;
+
+	case TexSampleMode::ANISOTROPIC:
+		desc->setMinFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMagFilter(MTL::SamplerMinMagFilterLinear);
+		desc->setMipFilter(_has_mipmaps ? MTL::SamplerMipFilterLinear
+		                                : MTL::SamplerMipFilterNotMipmapped);
+		desc->setMaxAnisotropy(TexDefs::DEF_MAX_ANISOTROPY);
+		break;
+	}
+
+	MTL::SamplerAddressMode address = MTL::SamplerAddressModeRepeat;
+	switch (_sample_mode & TexSampleMode::ADDRESS_MASK) {
+	default:
+	case TexSampleMode::REPEAT:
+		address = MTL::SamplerAddressModeRepeat;
+		break;
+
+	case TexSampleMode::CLAMP:
+		address = MTL::SamplerAddressModeClampToEdge;
+		break;
+
+	case TexSampleMode::CLAMP_BORDER:
+		address = MTL::SamplerAddressModeClampToBorderColor;
+		desc->setBorderColor(MTL::SamplerBorderColorOpaqueBlack);
+		break;
+	}
+
+	desc->setSAddressMode(address);
+	desc->setTAddressMode(address);
+	desc->setRAddressMode(address);
+
+	_sampler = PSI_G::metal_ctx->device()->newSamplerState(desc);
+	desc->release();
+}
+
+void PSIGLTexture::gen_mipmaps(GLboolean generate) {
+	if (!generate || _texture == nullptr || PSI_G::metal_ctx == nullptr) {
+		return;
+	}
+	if (_texture->mipmapLevelCount() <= 1) {
+		return;
+	}
+
+	// glGenerateMipmap had no explicit command buffer; Metal needs a blit pass.
+	// This runs at load time, outside the frame's command buffer, so it gets its
+	// own and waits -- the texture must be complete before first use.
+	MTL::CommandBuffer *cmd = PSI_G::metal_ctx->queue()->commandBuffer();
+	if (cmd == nullptr) {
+		return;
+	}
+
+	MTL::BlitCommandEncoder *blit = cmd->blitCommandEncoder();
+	if (blit == nullptr) {
+		return;
+	}
+
+	blit->generateMipmaps(_texture);
+	blit->endEncoding();
+	cmd->commit();
+	cmd->waitUntilCompleted();
+
+	_has_mipmaps = true;
+
+	// The mip filter depends on mipmaps existing, so rebuild with that known.
+	rebuild_sampler();
+
+	psilog(PSILog::TEXTURE, "Generated %lu mipmap levels",
+	       (unsigned long)_texture->mipmapLevelCount());
+}
+
+void PSIGLTexture::bind() {
+	if (PSI_G::metal_ctx == nullptr || _texture == nullptr) {
+		return;
+	}
+
+	MTL::RenderCommandEncoder *encoder = PSI_G::metal_ctx->encoder();
+	if (encoder == nullptr) {
+		// Called during asset loading, outside a frame. The GL version bound to
+		// global state here; there is nothing to do until a draw.
+		return;
+	}
+
+	if (_sampler == nullptr) {
+		rebuild_sampler();
+	}
+
+	// Slot 0 matches [[texture(0)]] / [[sampler(0)]] in the shaders and the
+	// "u_diffuse" = 0 the draw path sets.
+	encoder->setFragmentTexture(_texture, 0);
+	if (_sampler != nullptr) {
+		encoder->setFragmentSamplerState(_sampler, 0);
+	}
+}
+
+void PSIGLTexture::unbind() {
+	// No global binding point to clear; the next draw sets what it needs.
+}

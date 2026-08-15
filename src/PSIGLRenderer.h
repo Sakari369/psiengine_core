@@ -100,8 +100,17 @@ class PSIGLRenderer {
 		}
 
 		// Store reference to the PSIVideo instance.
+		// Also picks up the Metal context, which PSIVideo owns -- render() and
+		// PSIVideo::flip() both operate on the same frame through it.
 		void set_video(const shared_ptr<PSIVideo> &video) {
 			_video = video;
+			if (video != nullptr) {
+				_metal_ctx = video->get_metal_context();
+			}
+		}
+
+		MetalContextSharedPtr get_metal_context() {
+			return _metal_ctx;
 		}
 
 		// Write current OpenGL buffer to PNG file.
@@ -113,6 +122,9 @@ class PSIGLRenderer {
 
 		// The video instance reference for accessing the video data and so on.
 		shared_ptr<PSIVideo> _video;
+
+		// Metal device, queue and swapchain. Owned by PSIVideo.
+		MetalContextSharedPtr _metal_ctx;
 
 		// Offscreen framebuffer we are rendering to.
 		GLuint _offscreen_fbo = -1;

@@ -106,7 +106,9 @@ class PSIRenderObj {
 
 		// Common methods shared between instances of PSIRenderObj.
 		void draw_mesh() {
-			//psilog(PSILog::FREQ, "Drawing mesh");
+			// The staged uniform block is flushed inside the mesh draw, so every
+			// draw path gets it (PSITextRenderer::draw() calls draw_indexed()
+			// directly rather than coming through here).
 			_render_asset.mesh->draw_indexed();
 		}
 

@@ -225,25 +225,48 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 			   const RenderContextSharedPtr &ctx, 
 			   const CameraSharedPtr &camera) {
 
-	// Render directly to the screen.
-	if (scene->get_render_to_texture() == true) {
-		assert(_offscreen_fbo != -1);
-
-		// In order for this to work, we need the viewport size.
-		// In case of the offscreen texture rendering, the viewport size can be the 
-		// size of the texture.
-		glm::ivec2 texture_size = _offscreen_texture->get_size();
-		glBindFramebuffer(GL_FRAMEBUFFER, _offscreen_fbo);
-		glViewport(0, 0, texture_size.x, texture_size.y);
-	} else {
-		// Render to screen buffer.
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		glViewport(0, 0, _viewport_size.x, _viewport_size.y);
+	// Begin this frame's render pass. This clears colour and depth, and lazily
+	// acquires the drawable -- scripts that call render() twice before flip()
+	// (psiengine.lua, triforce.lua) get a second clearing pass on the same
+	// drawable rather than a second drawable.
+	//
+	// Returns nullptr when the window has no drawable (occluded/minimized), in
+	// which case there is nothing to draw into this frame.
+	if (_metal_ctx == nullptr) {
+		return;
+	}
+	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_frame(ctx->bg_color);
+	if (encoder == nullptr) {
+		return;
 	}
 
-	// Clear the screen.
-	glClearColor(ctx->bg_color.r, ctx->bg_color.g, ctx->bg_color.b, ctx->bg_color.a);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// Face culling. The GL version set this once in init() because it was global
+	// state; Metal state lives on the encoder, so it is applied per frame.
+	switch (_cull_mode) {
+	case CullMode::FRONT:
+		encoder->setCullMode(MTL::CullModeFront);
+		break;
+	case CullMode::BACK:
+		encoder->setCullMode(MTL::CullModeBack);
+		break;
+	case CullMode::DISABLED:
+	default:
+		encoder->setCullMode(MTL::CullModeNone);
+		break;
+	}
+
+	// Wireframe. Direct equivalent of glPolygonMode(GL_FRONT_AND_BACK, GL_LINE).
+	if (_wireframe) {
+		encoder->setTriangleFillMode(MTL::TriangleFillModeLines);
+	} else {
+		encoder->setTriangleFillMode(MTL::TriangleFillModeFill);
+	}
+
+	// TODO(M5): render-to-texture. The GL path bound _offscreen_fbo here; under
+	// Metal this becomes a render pass targeting the offscreen texture.
+	if (scene->get_render_to_texture() == true) {
+		psilog(PSILog::FREQ, "render-to-texture not implemented on Metal yet");
+	}
 
 	if (_blending_enabled) {
 		glEnable(GL_BLEND);
