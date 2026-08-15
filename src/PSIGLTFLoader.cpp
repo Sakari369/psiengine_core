@@ -1,47 +1,81 @@
 #include "PSIGLTFLoader.h"
 
-#define BUFFER_OFFSET(i) ((char *)NULL + (i))
+#include <cstring>
+
+namespace {
+
+// Size in bytes of one glTF component. The values are the GL scalar type
+// constants glTF 1.0 inherited.
+size_t gltf_component_size(GLint component_type) {
+	switch (component_type) {
+	case TINYGLTF_COMPONENT_TYPE_BYTE:
+	case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+		return 1;
+	case TINYGLTF_COMPONENT_TYPE_SHORT:
+	case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+		return 2;
+	case TINYGLTF_COMPONENT_TYPE_INT:
+	case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+	case TINYGLTF_COMPONENT_TYPE_FLOAT:
+		return 4;
+	default:
+		return 0;
+	}
+}
+
+// Copy an accessor's elements out of its buffer view into a tightly packed
+// block.
+//
+// glTF stores attributes inside shared buffer views at arbitrary offsets and
+// strides, but PSIGLMesh keeps one tightly packed buffer per attribute -- the
+// layout PSIGLShader builds its vertex descriptor around. De-interleaving here
+// at load time is far simpler than teaching the shared vertex descriptor about
+// per-attribute offsets and strides, and it costs one copy per model.
+bool gltf_pack_accessor(const tinygltf::Scene &scene,
+                        const tinygltf::Accessor &accessor,
+                        size_t element_size,
+                        std::vector<uint8_t> *out) {
+	auto view_it = scene.bufferViews.find(accessor.bufferView);
+	if (view_it == scene.bufferViews.end()) {
+		return false;
+	}
+	const tinygltf::BufferView &view = view_it->second;
+
+	auto buffer_it = scene.buffers.find(view.buffer);
+	if (buffer_it == scene.buffers.end()) {
+		return false;
+	}
+	const tinygltf::Buffer &buffer = buffer_it->second;
+
+	// A zero stride means tightly packed.
+	size_t stride = (accessor.byteStride > 0) ? accessor.byteStride : element_size;
+	size_t start = view.byteOffset + accessor.byteOffset;
+	size_t needed = (accessor.count > 0) ? (start + (accessor.count - 1) * stride + element_size) : start;
+
+	if (needed > buffer.data.size()) {
+		psilog_err("glTF accessor runs past its buffer (%zu > %zu)", needed, buffer.data.size());
+		return false;
+	}
+
+	out->resize(accessor.count * element_size);
+	const uint8_t *src = buffer.data.data() + start;
+	uint8_t *dst = out->data();
+
+	for (size_t i = 0; i < accessor.count; i++) {
+		std::memcpy(dst + i * element_size, src + i * stride, element_size);
+	}
+
+	return true;
+}
+
+} // namespace
 
 GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, const tinygltf::Scene &scene) {
 	psilog(PSILog::OPENGL, "Creating mesh from glTF scene");
 
 	// Create new mesh object.
 	GLMeshSharedPtr mesh_obj = PSIGLMesh::create();
-	mesh_obj->gen_vao();
-	mesh_obj->bind_vao();
-
-	std::map<std::string, GLuint> buffer_ids;
-
-	for (const auto &it : scene.bufferViews) {
-		const tinygltf::BufferView &view = it.second;
-
-		if (view.target == 0) {
-			std::cout << "WARN: view.target is zero" << std::endl;
-			continue;  // Unsupported view.
-		}
-
-		const tinygltf::Buffer &buffer = scene.buffers.at(view.buffer);
-		assert((view.byteOffset + view.byteLength) <= buffer.data.size());
-
-		// We have one buffer per buffer view.
-		// Generate the buffer for that.
-		GLuint buffer_id;
-		glGenBuffers(1, &buffer_id);
-		glBindBuffer(view.target, buffer_id);
-		glBufferData(view.target, view.byteLength, &buffer.data.at(0) + view.byteOffset, GL_STATIC_DRAW);
-
-		psilog(PSILog::OPENGL, "view.target = %d .buffer = %s .byteOffset = %d .byteLength = %d", 
-					view.target, view.buffer.c_str(), view.byteOffset, view.byteLength);
-
-		// Store the id for later reference.
-		buffer_ids[it.first] = buffer_id;
-	}
-
-	/*
-	for (auto buffer_id : buffer_ids) {
-		plog_s("buffer_ids[%s] = %d", buffer_id.first.c_str(), buffer_id.second);
-	}
-	*/
+	mesh_obj->init();
 
 	// Setup the meshes.
 	for (const auto &node_it : scene.nodes ) {
@@ -66,6 +100,21 @@ GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, con
 
 					draw_count = indices_accessor.count;
 					index_type = indices_accessor.componentType;
+
+					// Upload the index data, packed.
+					size_t index_size = gltf_component_size(index_type);
+					std::vector<uint8_t> indices;
+					if (index_size > 0 &&
+					    gltf_pack_accessor(scene, indices_accessor, index_size, &indices)) {
+						mesh_obj->bind_buffer(GL_ELEMENT_ARRAY_BUFFER, PSIGLMesh::BufferName::INDEX);
+						mesh_obj->buffer_data(GL_ELEMENT_ARRAY_BUFFER, indices.size(),
+						                      indices.data(), GL_STATIC_DRAW);
+
+						psilog(PSILog::OPENGL, "Uploaded %d indices (%zu bytes each)",
+						       draw_count, index_size);
+					} else {
+						psilog_err("Failed reading glTF indices");
+					}
 
 					auto get_draw_mode = [](GLint primitive_mode) {
 						GLint draw_mode;
@@ -104,9 +153,6 @@ GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, con
 
 						auto accessor_it = scene.accessors.find(attr_accessor);
       					const tinygltf::Accessor &accessor = accessor_it->second;
-
-						// At this point we should have all the data to setup the vertex attributes
-						glBindBuffer(GL_ARRAY_BUFFER, buffer_ids[accessor.bufferView]);
 
 						auto get_attrib_location = [](std::string attr_name) {
 							GLuint loc;
@@ -148,14 +194,38 @@ GLMeshSharedPtr PSIGLTFLoader::create_gl_mesh(const ShaderSharedPtr &shader, con
 						};
 						GLint size = get_attrib_size(accessor.type);
 
-						glVertexAttribPointer(loc, size, accessor.componentType, GL_FALSE,
-								      accessor.byteStride, BUFFER_OFFSET(accessor.byteOffset));
-						glEnableVertexAttribArray(loc);
+						if (loc == PSIGLShader::AttribLocation::INVALID) {
+							psilog(PSILog::OPENGL, "Skipping unmapped glTF attribute '%s'",
+							       attr_name.c_str());
+							continue;
+						}
 
-						psilog(PSILog::OPENGL, 
-							"Enabled vertex attrib %s for location = %d, size = %d stride = %d offset = %d type = %d", 
-							accessor_it->first.c_str(), loc, size, 
-							accessor.byteStride, accessor.byteOffset, accessor.componentType);
+						// The shaders read every attribute as float. glTF may
+						// store normalized integers instead, which would need
+						// converting rather than copying.
+						if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+							psilog_err("glTF attribute '%s' is component type %d, not float; skipping",
+							           attr_name.c_str(), accessor.componentType);
+							continue;
+						}
+
+						size_t element_size = size * gltf_component_size(accessor.componentType);
+						std::vector<uint8_t> packed;
+						if (!gltf_pack_accessor(scene, accessor, element_size, &packed)) {
+							psilog_err("Failed reading glTF attribute '%s'", attr_name.c_str());
+							continue;
+						}
+
+						// One tightly packed buffer per attribute, bound at the
+						// attribute's own index.
+						mesh_obj->bind_buffer(GL_ARRAY_BUFFER, loc);
+						mesh_obj->buffer_data(GL_ARRAY_BUFFER, packed.size(),
+						                      packed.data(), GL_STATIC_DRAW);
+						mesh_obj->enable_vertex_attrib(loc, size, 0, nullptr, accessor.componentType);
+
+						psilog(PSILog::OPENGL,
+							"Packed glTF attribute %s -> location %d (%d comps, %d elements, src stride %d)",
+							attr_name.c_str(), loc, size, (int)accessor.count, accessor.byteStride);
 					}
 				}
 			}
