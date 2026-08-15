@@ -61,6 +61,10 @@ PSIGLMesh::~PSIGLMesh() {
 			_buffers[i] = nullptr;
 		}
 	}
+	if (_instance_buffer != nullptr) {
+		_instance_buffer->release();
+		_instance_buffer = nullptr;
+	}
 }
 
 bool PSIGLMesh::init() {
@@ -212,6 +216,109 @@ void PSIGLMesh::bind_vertex_buffers(MTL::RenderCommandEncoder *encoder) {
 		}
 		encoder->setVertexBuffer(_buffers[i], 0, i);
 	}
+
+	// The instance array sits well clear of the attribute slots, at 18.
+	if (_instance_buffer != nullptr) {
+		encoder->setVertexBuffer(_instance_buffer, 0, PSIMetal::BUFFER_INSTANCE_DATA);
+	}
+}
+
+void PSIGLMesh::set_instance_count(GLuint count) {
+	if (count == _instances.size()) {
+		return;
+	}
+
+	_instances.resize(count);
+	_instances_dirty = true;
+}
+
+void PSIGLMesh::set_instance_matrix(GLuint index, const glm::mat4 &model) {
+	if (index >= _instances.size()) {
+		psilog_err("Instance index %u out of range (count %zu)", index, _instances.size());
+		return;
+	}
+
+	_instances[index].model = model;
+	_instances_dirty = true;
+}
+
+void PSIGLMesh::set_instance_transform(GLuint index, PSIGLTransform &transform) {
+	set_instance_matrix(index, transform.get_model());
+}
+
+void PSIGLMesh::set_instance_color(GLuint index, const glm::vec4 &color) {
+	if (index >= _instances.size()) {
+		psilog_err("Instance index %u out of range (count %zu)", index, _instances.size());
+		return;
+	}
+
+	_instances[index].color = color;
+	_instances_dirty = true;
+}
+
+void PSIGLMesh::set_instance_custom(GLuint index, const glm::vec4 &custom) {
+	if (index >= _instances.size()) {
+		psilog_err("Instance index %u out of range (count %zu)", index, _instances.size());
+		return;
+	}
+
+	_instances[index].custom = custom;
+	_instances_dirty = true;
+}
+
+void PSIGLMesh::set_instance(GLuint index, PSIGLTransform &transform,
+                             const glm::vec4 &color, const glm::vec4 &custom) {
+	if (index >= _instances.size()) {
+		psilog_err("Instance index %u out of range (count %zu)", index, _instances.size());
+		return;
+	}
+
+	_instances[index].model = transform.get_model();
+	_instances[index].color = color;
+	_instances[index].custom = custom;
+	_instances_dirty = true;
+}
+
+void PSIGLMesh::upload_instances() {
+	if (!_instances_dirty) {
+		return;
+	}
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		return;
+	}
+
+	const size_t bytes = _instances.size() * sizeof(instance_data);
+	if (bytes == 0) {
+		if (_instance_buffer != nullptr) {
+			_instance_buffer->release();
+			_instance_buffer = nullptr;
+		}
+		_instances_dirty = false;
+		return;
+	}
+
+	// Reuse the buffer when it is still big enough; per-frame instance updates
+	// then cost a memcpy rather than an allocation.
+	if (_instance_buffer != nullptr && _instance_buffer->length() < bytes) {
+		_instance_buffer->release();
+		_instance_buffer = nullptr;
+	}
+
+	if (_instance_buffer == nullptr) {
+		_instance_buffer = PSI_G::metal_ctx->device()->newBuffer(
+			bytes, MTL::ResourceStorageModeShared);
+
+		if (_instance_buffer == nullptr) {
+			psilog_err("Failed allocating instance buffer for %zu instances", _instances.size());
+			return;
+		}
+
+		psilog(PSILog::OPENGL, "Allocated instance buffer for %zu instances (%zu bytes)",
+		       _instances.size(), bytes);
+	}
+
+	std::memcpy(_instance_buffer->contents(), _instances.data(), bytes);
+	_instances_dirty = false;
 }
 
 void PSIGLMesh::draw() {
@@ -238,7 +345,8 @@ void PSIGLMesh::draw() {
 
 	flush_current_uniforms();
 	bind_vertex_buffers(encoder);
-	encoder->drawPrimitives(prim, (NS::UInteger)0, (NS::UInteger)_draw_count);
+	encoder->drawPrimitives(prim, (NS::UInteger)0, (NS::UInteger)_draw_count,
+	                        (NS::UInteger)draw_instance_count());
 }
 
 void PSIGLMesh::draw_instanced(GLuint vertex_count, GLuint instances) {
@@ -325,9 +433,12 @@ void PSIGLMesh::draw_indexed(GLuint offset, GLuint count) {
 
 	flush_current_uniforms();
 	bind_vertex_buffers(encoder);
+	// instanceCount is 1 for an uninstanced mesh, so this is the same draw it
+	// always was for everything that does not opt in.
 	encoder->drawIndexedPrimitives(prim,
 	                               draw_count,
 	                               index_type,
 	                               index_buffer,
-	                               (NS::UInteger)offset * index_size);
+	                               (NS::UInteger)offset * index_size,
+	                               (NS::UInteger)draw_instance_count());
 }

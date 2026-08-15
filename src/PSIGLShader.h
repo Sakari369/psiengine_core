@@ -179,6 +179,16 @@ class PSIGLShader {
 			return _has_geometry_stage;
 		}
 
+		// Build this shader against the instanced entry point, which reads
+		// per-instance data from PSIMetal::BUFFER_INSTANCE_DATA. Must be called
+		// before compile().
+		void set_instanced(GLboolean instanced) {
+			_instanced = instanced;
+		}
+		bool is_instanced() const {
+			return _instanced;
+		}
+
 		// Name for display.
 		void set_name(std::string name) {
 			_name = name;
@@ -213,6 +223,9 @@ class PSIGLShader {
 		std::string _vertex_base;
 		std::string _fragment_base;
 		bool _has_geometry_stage = false;
+		// Resolve to the "_instanced" vertex entry point, which reads the
+		// per-instance buffer.
+		bool _instanced = false;
 
 		// Program id. Not a GL name any more, just a stable handle for logging
 		// and for the Lua-visible get_program().

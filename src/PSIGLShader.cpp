@@ -246,11 +246,17 @@ GLuint PSIGLShader::compile() {
 		return _program;
 	}
 
-	// A geometry stage means the GLSL version amplified points into triangles.
-	// The replacement is a vertex shader driven by vertex_id/instance_id, which
-	// lives under a distinct entry point name.
+	// The "_instanced" suffix marks a vertex entry point driven by
+	// instance_id/vertex_id rather than one draw per object. Two things ask for
+	// it, and they are disjoint in practice:
+	//
+	//   - a geometry stage, whose GLSL amplified points into triangles and is
+	//     replaced by a vertex shader generating them from vertex_id;
+	//   - set_instanced(), where the mesh carries a per-instance buffer.
+	//
+	// The fragment stage keeps its plain name either way.
 	std::string vertex_fn_name = "vertex_" + _vertex_base;
-	if (_has_geometry_stage) {
+	if (_has_geometry_stage || _instanced) {
 		vertex_fn_name += "_instanced";
 	}
 

@@ -90,7 +90,27 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 
 	// Set uniforms specific for this render object.
 	shader->set_uniform("u_model_view_projection_matrix", get_model_view_projection_matrix());
-	shader->set_uniform("u_normal_matrix", get_normal_matrix());
+
+	auto gl_mesh = get_gl_mesh();
+	if (gl_mesh != nullptr && gl_mesh->is_instanced()) {
+		// Instanced shaders build their own MVP, because the per-instance
+		// transform has to sit between this object's model matrix and the view.
+		// The pre-multiplied MVP above is no use to them.
+		shader->set_uniform("u_model_matrix", get_model_matrix());
+		shader->set_uniform("u_view_matrix", ctx->view.top());
+		shader->set_uniform("u_projection_matrix", ctx->projection.top());
+
+		// Identity: the instanced vertex shader transforms the normal by the
+		// combined model matrix itself, so per-instance rotation affects
+		// lighting. That makes fragment_phong's `u_normal_matrix * f_normal` a
+		// no-op and lets the fragment shader be shared unchanged.
+		shader->set_uniform("u_normal_matrix", glm::mat3(1.0f));
+
+		// Push any pending instance edits before the draw reads the buffer.
+		gl_mesh->upload_instances();
+	} else {
+		shader->set_uniform("u_normal_matrix", get_normal_matrix());
+	}
 
 	// Draw the mesh
 	draw_mesh();

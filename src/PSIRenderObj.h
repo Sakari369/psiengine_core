@@ -122,6 +122,44 @@ class PSIRenderObj {
 			_render_asset.mesh->set_draw_mode(draw_mode);
 		}
 
+		// Instancing, forwarded to the mesh.
+		//
+		// Scripts hold render objects, not the PSIGLMesh underneath, so these
+		// save every caller a get_gl_mesh() hop. The mesh owns the data; see
+		// PSIGLMesh.h for what an instance carries.
+		//
+		// The object's material must use a shader built with set_instanced(true),
+		// otherwise the vertex shader will not read the instance buffer.
+		void set_instance_count(GLuint count) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_instance_count(count);
+		}
+		GLuint get_instance_count() {
+			assert(_render_asset.mesh != nullptr);
+			return _render_asset.mesh->get_instance_count();
+		}
+		void set_instance(GLuint index, PSIGLTransform &transform,
+		                  const glm::vec4 &color, const glm::vec4 &custom) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_instance(index, transform, color, custom);
+		}
+		void set_instance_transform(GLuint index, PSIGLTransform &transform) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_instance_transform(index, transform);
+		}
+		void set_instance_color(GLuint index, const glm::vec4 &color) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_instance_color(index, color);
+		}
+		void set_instance_custom(GLuint index, const glm::vec4 &custom) {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->set_instance_custom(index, custom);
+		}
+		void upload_instances() {
+			assert(_render_asset.mesh != nullptr);
+			_render_asset.mesh->upload_instances();
+		}
+
 		void set_transform(PSIGLTransform transform) {
 			_render_asset.transform = transform;
 		}

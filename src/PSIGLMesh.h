@@ -22,6 +22,8 @@
 
 #include "PSIGlobals.h"
 #include "PSIGLUtils.h"
+// For set_instance_transform(); PSIGLTransform is pure math despite the name.
+#include "PSIGLTransform.h"
 
 class PSIGLMesh;
 typedef shared_ptr<PSIGLMesh> GLMeshSharedPtr;
@@ -87,6 +89,53 @@ class PSIGLMesh {
 		// Draw `instances` copies. Used by the instanced replacements for the
 		// geometry shaders, which amplify one point into a fixed vertex count.
 		void draw_instanced(GLuint vertex_count, GLuint instances);
+
+		// --- Instancing -------------------------------------------------
+		//
+		// Per-instance data lives in a constant buffer at
+		// PSIMetal::BUFFER_INSTANCE_DATA, indexed by [[instance_id]] in the
+		// shader -- not in vertex attributes, whose descriptor is built by
+		// reflection with per-vertex stepping.
+		//
+		// A mesh with instances still draws through the normal draw_indexed()
+		// path; the instance count is simply passed to Metal. Meshes with no
+		// instances draw with a count of 1 and behave exactly as before, so
+		// nothing existing has to change.
+		//
+		// The shader must be built with PSIGLShader::set_instanced(true) so it
+		// resolves to the entry point that reads this buffer.
+
+		// Must match PSIInstanceData in assets/shaders/psi_common.h byte for
+		// byte (64 + 16 + 16 = 96, no padding on either side).
+		struct instance_data {
+			glm::mat4 model  = glm::mat4(1.0f);
+			glm::vec4 color  = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+			glm::vec4 custom = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+		};
+
+		// Resize the instance array. New entries start as identity/white.
+		void set_instance_count(GLuint count);
+		GLuint get_instance_count() const {
+			return (GLuint)_instances.size();
+		}
+		bool is_instanced() const {
+			return !_instances.empty();
+		}
+
+		// Per-instance setters. Out-of-range indexes are ignored with a warning
+		// rather than growing the array, so a Lua typo cannot silently allocate.
+		void set_instance_matrix(GLuint index, const glm::mat4 &model);
+		void set_instance_transform(GLuint index, PSIGLTransform &transform);
+		void set_instance_color(GLuint index, const glm::vec4 &color);
+		void set_instance_custom(GLuint index, const glm::vec4 &custom);
+
+		// Set everything for one instance at once. The common case from Lua.
+		void set_instance(GLuint index, PSIGLTransform &transform,
+		                  const glm::vec4 &color, const glm::vec4 &custom);
+
+		// Push the CPU-side array to the GPU. Cheap to call when nothing is
+		// dirty; required before the changes are visible.
+		void upload_instances();
 
 		// No-ops: Metal has no vertex array objects, and buffers are allocated
 		// on upload rather than reserved up front. Kept so the existing
@@ -166,6 +215,17 @@ class PSIGLMesh {
 		GLuint _draw_mode = GL_TRIANGLES;
 		// The index component type, as a GL enum.
 		GLenum _index_type = GL_UNSIGNED_INT;
+
+		// Per-instance data, CPU side, and its GPU copy.
+		std::vector<instance_data> _instances;
+		MTL::Buffer *_instance_buffer = nullptr;
+		// Instances changed since the last upload_instances().
+		bool _instances_dirty = false;
+
+		// How many copies the next draw should issue. Always at least 1.
+		GLuint draw_instance_count() const {
+			return _instances.empty() ? 1 : (GLuint)_instances.size();
+		}
 
 		// Bind every populated attribute buffer on the active encoder.
 		void bind_vertex_buffers(MTL::RenderCommandEncoder *encoder);
