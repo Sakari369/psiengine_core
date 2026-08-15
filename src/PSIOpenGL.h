@@ -47,6 +47,6 @@
 // Metal backend and the GL scalar typedef shim.
 #include "PSIMetal.h"
 
-// TEMPORARY: inert stubs for the GL calls not yet ported. Delete along with
-// PSIGLCompat.h once the last PSIGL* class is on Metal.
-#include "PSIGLCompat.h"
+// Enum constants inherited from OpenGL that are still part of the engine's
+// data model and its Lua-facing draw-mode contract.
+#include "PSIGLEnums.h"

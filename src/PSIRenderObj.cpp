@@ -149,7 +149,6 @@ void PSIRenderObj::init_buffers(const GLMeshSharedPtr &mesh, const GeometryDataS
 		}
 
 		mesh->buffer_data(buffer.target, buffer.size, data_ptr, buffer.usage);
-		check_gl_error();
 
 		psilog(PSILog::OPENGL, "Initialized buffer with name_id %d, id= %d, target = %d, size = %d", 
 					buffer.name_id, mesh->get_buffer_id(buffer.name_id), buffer.target, buffer.size);
@@ -159,7 +158,6 @@ void PSIRenderObj::init_buffers(const GLMeshSharedPtr &mesh, const GeometryDataS
 	for (const auto &attrib : geometry_data->attributes) {
 		mesh->bind_buffer(GL_ARRAY_BUFFER, attrib.buffer_name_id);
 		mesh->enable_vertex_attrib(shader_prog, attrib.name, attrib.size, attrib.stride, attrib.pointer, attrib.type);
-		check_gl_error();
 
 		psilog(PSILog::OPENGL, "Attribute '%s' added to program %d (size = %d stride = %d type = %d)",
 					attrib.name, shader_prog, attrib.size, attrib.stride, attrib.type);

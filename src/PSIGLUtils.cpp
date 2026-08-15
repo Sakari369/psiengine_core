@@ -15,46 +15,10 @@ void print_mat4(glm::mat4 const &matrix) {
 	}
 }
 
-GLboolean check_error(const char *file, int line) {
-	GLenum err = glGetError();
-	GLboolean err_found = false;
-
-	while(err != GL_NO_ERROR) {
-		std::string error_str;
-
-		switch(err) {
-		case GL_INVALID_OPERATION:
-			error_str = "INVALID_OPERATION";
-			break;
-
-		case GL_INVALID_ENUM:
-			error_str = "INVALID_ENUM";
-			break;
-
-		case GL_INVALID_VALUE:
-			error_str = "INVALID_VALUE";
-			break;
-
-		case GL_OUT_OF_MEMORY:
-			error_str = "OUT_OF_MEMORY";
-			break;
-
-		case GL_INVALID_FRAMEBUFFER_OPERATION:
-			error_str = "INVALID_FRAMEBUFFER_OPERATION";
-			break;
-
-		default:
-			break;
-		}
-
-		psilog(PSILog::OPENGL, "%s:%d %s", file, line, error_str.c_str());
-
-		err = glGetError();
-		err_found = true;
-	}
-
-	return err_found;
-}
+// check_error() is gone: it polled glGetError(), which has no Metal
+// equivalent. Metal reports errors through NSError at resource creation and
+// through the validation layers at draw time -- run with MTL_DEBUG_LAYER=1
+// and MTL_SHADER_VALIDATION=1 instead.
 
 /*
 bool createFullscreenQuadInAsset(PSIRenderObj::render_asset &asset) {

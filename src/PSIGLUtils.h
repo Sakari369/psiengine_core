@@ -1,6 +1,6 @@
 // PSIEngine Copyright (c) 2021 Sakari Lehtonen <sakari@psitriangle.net>
 //
-// OpenGL utility functions.
+// Debug printing helpers for glm types.
 
 #pragma once
 
@@ -13,7 +13,6 @@
 #include "PSIOpenGL.h"
 #include "PSIFileUtils.h"
 
-#define check_gl_error()	PSIGLUtils::check_error(__FILE__, __LINE__)
 #define print_glm_vecs(x)	PSIGLUtils::print_vectors_of_glm(#x, x)
 #define print_vecs(x)	        PSIGLUtils::print_vectors(#x, x)
 #define print_vec(x)	        PSIGLUtils::print_glm_vec(#x, x)
@@ -45,7 +44,6 @@ namespace PSIGLUtils {
 	}
 
 	void print_mat4(glm::mat4 const &matrix);
-	GLboolean check_error(const char *file, int line);
 
 	//bool createFullscreenQuadInAsset(PSIRenderObj::render_asset &asset);
 }

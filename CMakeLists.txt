@@ -88,6 +88,7 @@ set(SOURCES
 
 set(HEADER_FILES
 	src/PSIMetal.h
+	src/PSIGLEnums.h
 	src/PSIAudio.h
 	src/PSIGlobals.h 
 	src/PSILog.h 
