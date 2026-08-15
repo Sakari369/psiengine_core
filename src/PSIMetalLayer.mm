@@ -40,7 +40,12 @@ void *attach_metal_layer(GLFWwindow *window, void *mtl_device, double contents_s
 	// BGRA8Unorm is the only format CAMetalLayer is guaranteed to support and is
 	// what the drawable hands back; the render pipelines must match it.
 	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-	layer.framebufferOnly = YES;
+
+	// NO, so the drawable can be used as a blit source. That is what makes
+	// screenshots possible at all (PSIGLRenderer::write_screen_to_file); a
+	// framebuffer-only drawable can be rendered to but never read back.
+	// It costs some lossless-compression opportunity on the drawable.
+	layer.framebufferOnly = NO;
 	layer.contentsScale = contents_scale;
 
 	// When the drawable is larger than the layer's bounds (supersampling), this

@@ -59,6 +59,10 @@ void PSIMetalContext::shutdown() {
 		_offscreen_msaa->release();
 		_offscreen_msaa = nullptr;
 	}
+	if (_capture_texture != nullptr) {
+		_capture_texture->release();
+		_capture_texture = nullptr;
+	}
 	if (_depth_state_on != nullptr) {
 		_depth_state_on->release();
 		_depth_state_on = nullptr;
@@ -521,6 +525,70 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_offscreen_frame(MTL::Texture *
 	return _encoder;
 }
 
+bool PSIMetalContext::ensure_capture_texture(glm::ivec2 size) {
+	if (_device == nullptr || size.x <= 0 || size.y <= 0) {
+		return false;
+	}
+	if (size == _capture_size && _capture_texture != nullptr) {
+		return true;
+	}
+
+	if (_capture_texture != nullptr) {
+		_capture_texture->release();
+		_capture_texture = nullptr;
+	}
+
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType(MTL::TextureType2D);
+	desc->setPixelFormat(color_format());
+	desc->setWidth(static_cast<NS::UInteger>(size.x));
+	desc->setHeight(static_cast<NS::UInteger>(size.y));
+	desc->setUsage(MTL::TextureUsageShaderRead);
+	// Shared so the CPU can read it without an explicit synchronize.
+	desc->setStorageMode(MTL::StorageModeShared);
+
+	_capture_texture = _device->newTexture(desc);
+	desc->release();
+
+	if (_capture_texture == nullptr) {
+		return false;
+	}
+
+	_capture_size = size;
+	_capture_valid = false;
+
+	return true;
+}
+
+bool PSIMetalContext::read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *size) {
+	if (rgb == nullptr || size == nullptr) {
+		return false;
+	}
+	if (_capture_texture == nullptr || !_capture_valid) {
+		psilog_err("No presented frame to read back yet");
+		return false;
+	}
+
+	const int w = _capture_size.x;
+	const int h = _capture_size.y;
+
+	std::vector<uint8_t> bgra((size_t)w * h * 4);
+	MTL::Region region = MTL::Region::Make2D(0, 0, (NS::UInteger)w, (NS::UInteger)h);
+	_capture_texture->getBytes(bgra.data(), (NS::UInteger)w * 4, region, 0);
+
+	// The drawable is BGRA; the image writers want tightly packed RGB.
+	rgb->resize((size_t)w * h * 3);
+	for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
+		(*rgb)[i * 3 + 0] = bgra[i * 4 + 2];
+		(*rgb)[i * 3 + 1] = bgra[i * 4 + 1];
+		(*rgb)[i * 3 + 2] = bgra[i * 4 + 0];
+	}
+
+	*size = _capture_size;
+
+	return true;
+}
+
 void PSIMetalContext::end_encoding() {
 	if (_encoder != nullptr) {
 		_encoder->endEncoding();
@@ -534,6 +602,26 @@ void PSIMetalContext::present() {
 	}
 
 	end_encoding();
+
+	// Keep a CPU-readable copy of what we are about to show.
+	//
+	// Core Animation recycles the drawable as soon as it is presented, so there
+	// is no equivalent of glReadBuffer(GL_FRONT) to read afterwards -- the copy
+	// has to be made now, while the texture is still ours. One full-screen blit
+	// per frame, which is cheap on unified memory.
+	if (_drawable != nullptr && ensure_capture_texture(_drawable_size)) {
+		MTL::BlitCommandEncoder *blit = _cmd->blitCommandEncoder();
+		if (blit != nullptr) {
+			blit->copyFromTexture(_drawable->texture(), 0, 0,
+			                      MTL::Origin(0, 0, 0),
+			                      MTL::Size((NS::UInteger)_drawable_size.x,
+			                                (NS::UInteger)_drawable_size.y, 1),
+			                      _capture_texture, 0, 0,
+			                      MTL::Origin(0, 0, 0));
+			blit->endEncoding();
+			_capture_valid = true;
+		}
+	}
 
 	// An offscreen frame has no drawable; it still needs committing.
 	if (_drawable != nullptr) {

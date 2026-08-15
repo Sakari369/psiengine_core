@@ -66,6 +66,14 @@ class PSIMetalContext {
 		// gets a no-op rather than a stall.
 		void present();
 
+		// Copy of the most recently presented frame, as tightly packed RGB8.
+		//
+		// present() blits each drawable into a CPU-visible texture, which is the
+		// Metal equivalent of reading GL's front buffer -- the drawable itself is
+		// recycled by Core Animation the moment it is presented, so it cannot be
+		// read after the fact. Returns false if no frame has been presented yet.
+		bool read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *size);
+
 		// Reallocates the drawable and depth buffer. Called on framebuffer resize.
 		void resize(glm::ivec2 drawable_size);
 
@@ -178,6 +186,12 @@ class PSIMetalContext {
 		MTL::Texture *_offscreen_msaa = nullptr;
 		glm::ivec2 _offscreen_size = glm::ivec2(0, 0);
 		bool ensure_offscreen_targets(glm::ivec2 size);
+
+		// CPU-visible copy of the last presented frame, for screenshots.
+		MTL::Texture *_capture_texture = nullptr;
+		glm::ivec2 _capture_size = glm::ivec2(0, 0);
+		bool _capture_valid = false;
+		bool ensure_capture_texture(glm::ivec2 size);
 
 		// Precompiled shader library, loaded lazily.
 		MTL::Library *_shader_library = nullptr;

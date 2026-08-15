@@ -17,37 +17,38 @@ enum ImageFormat {
 	QOI = 1
 };
 
-bool write_image(const char *filepath, ImageFormat format, GLFWwindow *window) {
-	GLint width;
-	GLint height;
-	glfwGetFramebufferSize(window, &width, &height);
+bool write_image(const char *filepath, ImageFormat format, const MetalContextSharedPtr &metal_ctx) {
+	if (metal_ctx == nullptr) {
+		return false;
+	}
 
-	GLsizei nrChannels = 3;
-	GLsizei stride = nrChannels * width;
-	stride += (stride % 4) ? (4 - stride % 4) : 0;
-
-	GLsizei bufferSize = stride * height;
-	std::vector<char> buffer(bufferSize);
-
-	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadBuffer(GL_FRONT);
+	// Read back the frame PSIMetalContext copied aside during present(). The GL
+	// version read the front buffer here; Metal drawables cannot be read after
+	// presentation, so the copy is made while the frame is still being built.
+	std::vector<uint8_t> buffer;
+	glm::ivec2 size;
 
  #ifdef PROFILE_SAVE_IMAGE
 	auto start = high_resolution_clock::now();
 #endif
-	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
+	if (!metal_ctx->read_last_frame(&buffer, &size)) {
+		return false;
+	}
+
+	const GLint width = size.x;
+	const GLint height = size.y;
 
  #ifdef PROFILE_SAVE_IMAGE
 	auto stop = high_resolution_clock::now();
 	auto duration = duration_cast<microseconds>(stop - start);
-	plog_s("glReadPixels took %d us", duration.count());
+	plog_s("frame readback took %d us", duration.count());
 #endif
 
  #ifdef PROFILE_SAVE_IMAGE
 	start = high_resolution_clock::now();
 #endif
 
-	// Use PNG or QOI target file format ? 
+	// Use PNG or QOI target file format ?
 
 	bool retval = false;
 
@@ -81,7 +82,7 @@ bool PSIGLRenderer::write_screen_to_file(std::string path_basename, int format) 
 
 	path = path_basename + file_ext;
 
-	bool retval = write_image(path.c_str(), (ImageFormat)format, _video->get_window());
+	bool retval = write_image(path.c_str(), (ImageFormat)format, _metal_ctx);
 	if (retval == true) {
 		psilog(PSILog::EXPORT, "Wrote screen frame to %s, format = %s", path.c_str(), file_ext.c_str());
 	}
