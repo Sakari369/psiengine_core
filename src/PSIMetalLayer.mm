@@ -43,14 +43,22 @@ void *attach_metal_layer(GLFWwindow *window, void *mtl_device, double contents_s
 	layer.framebufferOnly = YES;
 	layer.contentsScale = contents_scale;
 
-	// Pin the colour space to sRGB. Without this the layer inherits the
-	// display's (P3 on most modern Macs), so shader output gets re-mapped on the
-	// way to screen and colours no longer match the OpenGL build -- which makes
-	// side-by-side visual comparison during the port useless.
-	CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-	if (srgb != NULL) {
-		layer.colorspace = srgb;
-		CGColorSpaceRelease(srgb);
+	// Tag the layer with the DISPLAY's colour space, not sRGB.
+	//
+	// The OpenGL build was never colour managed: values went straight to the
+	// panel, so glClearColor(0, 1, 0, 1) produced the display's most saturated
+	// green. CAMetalLayer defaults to sRGB and Core Animation then converts
+	// every pixel into the display's space -- on a P3 display that turned full
+	// green into (146, 248, 58), a visible mismatch against the old renderer.
+	//
+	// Declaring the content to already be in the display's space means no
+	// conversion happens, which reproduces the OpenGL output exactly. Note this
+	// is sampled once; dragging the window to a display with a different profile
+	// would not re-tag it (the GL build had the same limitation, having simply
+	// never converted at all).
+	NSScreen *screen = ns_window.screen ?: [NSScreen mainScreen];
+	if (screen != nil && screen.colorSpace.CGColorSpace != NULL) {
+		layer.colorspace = screen.colorSpace.CGColorSpace;
 	}
 
 	NSView *view = [ns_window contentView];
