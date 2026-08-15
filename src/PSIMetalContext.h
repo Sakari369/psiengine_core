@@ -95,8 +95,19 @@ class PSIMetalContext {
 		// PSIGLMesh issues the draw, so the mesh needs a way to flush the block
 		// first. Under OpenGL each glUniform* applied to the bound program
 		// immediately and there was nothing to flush.
+		// Pass nullptr to mean "no usable pipeline is bound".
 		void set_current_shader(PSIGLShader *shader) { _current_shader = shader; }
 		PSIGLShader *current_shader() const { return _current_shader; }
+
+		// Is a valid render pipeline bound right now?
+		//
+		// Draw calls must check this. Metal keeps whatever pipeline was last set
+		// on the encoder, so a shader that failed to build used to leave the
+		// PREVIOUS shader's pipeline active and the next mesh drew through it
+		// with a mismatched vertex layout -- garbage on screen instead of a
+		// missing object. It is also false at the start of a render pass, before
+		// anything has been bound.
+		bool has_valid_pipeline() const { return _current_shader != nullptr; }
 		MTL::CommandBuffer *command_buffer() const { return _cmd; }
 		MTL::RenderCommandEncoder *encoder() const { return _encoder; }
 

@@ -445,12 +445,28 @@ void PSIGLShader::add_transform_feedback_varyings(std::vector<std::string> varyi
 }
 
 void PSIGLShader::use_program() {
-	if (_pipeline == nullptr || PSI_G::metal_ctx == nullptr) {
+	if (PSI_G::metal_ctx == nullptr) {
 		return;
 	}
 
 	MTL::RenderCommandEncoder *encoder = PSI_G::metal_ctx->encoder();
 	if (encoder == nullptr) {
+		return;
+	}
+
+	if (_pipeline == nullptr) {
+		// This shader failed to build. Unbind rather than returning early:
+		// Metal keeps the last pipeline set on the encoder, so leaving it alone
+		// would draw this object through the PREVIOUS shader's pipeline, with a
+		// vertex layout that does not match its mesh. That renders garbage
+		// instead of simply omitting the object.
+		PSI_G::metal_ctx->set_current_shader(nullptr);
+
+		if (_warned_no_pipeline == false) {
+			_warned_no_pipeline = true;
+			psilog_err("Shader %s has no pipeline; objects using it will not be drawn",
+			           get_info_str().c_str());
+		}
 		return;
 	}
 

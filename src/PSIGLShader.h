@@ -239,6 +239,9 @@ class PSIGLShader {
 		// Names already reported as missing, so a per-frame set_uniform() call
 		// does not spam the log.
 		std::unordered_set<std::string> _warned_uniforms;
+
+		// use_program() runs per frame; only report a missing pipeline once.
+		bool _warned_no_pipeline = false;
 		void warn_missing_uniform(const std::string &name);
 
 		// Look up an entry point in the shared metallib.

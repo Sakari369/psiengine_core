@@ -230,6 +230,12 @@ void PSIGLMesh::draw() {
 		return;
 	}
 
+	// Nothing may draw unless a usable pipeline is bound -- see
+	// PSIMetalContext::has_valid_pipeline().
+	if (!PSI_G::metal_ctx->has_valid_pipeline()) {
+		return;
+	}
+
 	flush_current_uniforms();
 	bind_vertex_buffers(encoder);
 	encoder->drawPrimitives(prim, (NS::UInteger)0, (NS::UInteger)_draw_count);
@@ -247,6 +253,12 @@ void PSIGLMesh::draw_instanced(GLuint vertex_count, GLuint instances) {
 
 	MTL::PrimitiveType prim;
 	if (!primitive_type_for(_draw_mode, &prim)) {
+		return;
+	}
+
+	// Nothing may draw unless a usable pipeline is bound -- see
+	// PSIMetalContext::has_valid_pipeline().
+	if (!PSI_G::metal_ctx->has_valid_pipeline()) {
 		return;
 	}
 
@@ -302,6 +314,12 @@ void PSIGLMesh::draw_indexed(GLuint offset, GLuint count) {
 		draw_count = available - offset;
 	}
 	if (draw_count == 0) {
+		return;
+	}
+
+	// Nothing may draw unless a usable pipeline is bound -- see
+	// PSIMetalContext::has_valid_pipeline().
+	if (!PSI_G::metal_ctx->has_valid_pipeline()) {
 		return;
 	}
 

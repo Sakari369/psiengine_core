@@ -351,6 +351,10 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	// writes off, which renders in draw order instead of depth order.
 	set_depth_test_enabled(true);
 
+	// A new encoder starts with no pipeline bound, so nothing may draw until a
+	// shader binds one.
+	_current_shader = nullptr;
+
 	return _encoder;
 }
 
