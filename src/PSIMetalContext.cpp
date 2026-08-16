@@ -827,30 +827,42 @@ bool PSIMetalContext::ensure_capture_texture(glm::ivec2 size) {
 	return true;
 }
 
-// Flip the drawable between 8-bit and float output.
+// Put the drawable into the mode the two opt-in flags between them ask for.
 //
 // Everything downstream follows from _color_format: the MSAA colour target is
 // allocated with it, the drawable pass signature reports it, and PSIGLShader
 // builds a pipeline variant per signature -- so no pipeline, pass or shader
 // needs to know this happened.
 //
-// The MSAA and capture textures do have to go: both were allocated in the old
-// format and would mismatch the attachment. They are rebuilt lazily.
-bool PSIMetalContext::enable_edr_output(bool enabled) {
+// EDR wins over colour management because it already is colour managed:
+// extendedLinearDisplayP3 is linear by definition, so asking for both is not a
+// conflict, it is a redundancy.
+bool PSIMetalContext::apply_output_mode() {
 	if (_layer == nullptr) {
 		return false;
 	}
-	if (enabled == _edr_output) {
-		return _edr_output;
+
+	int mode = PSIMetal::LAYER_OUTPUT_LEGACY;
+	MTL::PixelFormat format = MTL::PixelFormatBGRA8Unorm;
+
+	if (_edr_output) {
+		mode = PSIMetal::LAYER_OUTPUT_EDR;
+		format = MTL::PixelFormatRGBA16Float;
+	} else if (_color_managed) {
+		mode = PSIMetal::LAYER_OUTPUT_SRGB;
+		format = MTL::PixelFormatBGRA8Unorm_sRGB;
 	}
 
-	if (!PSIMetal::set_layer_edr(_layer, enabled)) {
-		psilog_err("Display does not support extended dynamic range output");
-		return _edr_output;
+	if (format == _color_format) {
+		return true;
 	}
 
-	_edr_output = enabled;
-	_color_format = enabled ? MTL::PixelFormatRGBA16Float : MTL::PixelFormatBGRA8Unorm;
+	if (!PSIMetal::set_layer_output(_layer, mode)) {
+		psilog_err("Could not put the drawable into output mode %d", mode);
+		return false;
+	}
+
+	_color_format = format;
 
 	// Rebuild the drawable's companion targets in the new format, through the
 	// function that owns them. Releasing _msaa_texture by hand instead left
@@ -869,9 +881,27 @@ bool PSIMetalContext::enable_edr_output(bool enabled) {
 	// The signature held between passes is the drawable's, and it just changed.
 	_pass_signature.color_format = _color_format;
 
-	psilog(PSILog::VIDEO, "EDR output %s, drawable is %s",
-	       enabled ? "on" : "off",
-	       enabled ? "RGBA16Float" : "BGRA8Unorm");
+	static const char *names[] = { "BGRA8Unorm (legacy, unmanaged)",
+	                               "BGRA8Unorm_sRGB (colour managed)",
+	                               "RGBA16Float (EDR)" };
+	psilog(PSILog::VIDEO, "Drawable is now %s", names[mode]);
+
+	return true;
+}
+
+bool PSIMetalContext::enable_edr_output(bool enabled) {
+	if (enabled == _edr_output) {
+		return _edr_output;
+	}
+
+	const bool was = _edr_output;
+	_edr_output = enabled;
+
+	if (!apply_output_mode()) {
+		_edr_output = was;
+		psilog_err("Display does not support extended dynamic range output");
+		return _edr_output;
+	}
 
 	if (enabled) {
 		PSIMetal::log_edr_displays(
@@ -884,6 +914,21 @@ bool PSIMetalContext::enable_edr_output(bool enabled) {
 	}
 
 	return _edr_output;
+}
+
+bool PSIMetalContext::enable_color_managed(bool enabled) {
+	if (enabled == _color_managed) {
+		return _color_managed;
+	}
+
+	const bool was = _color_managed;
+	_color_managed = enabled;
+
+	if (!apply_output_mode()) {
+		_color_managed = was;
+	}
+
+	return _color_managed;
 }
 
 double PSIMetalContext::edr_headroom() const {

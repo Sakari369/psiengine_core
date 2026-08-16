@@ -112,41 +112,48 @@ void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only) {
 	layer.framebufferOnly = framebuffer_only ? YES : NO;
 }
 
-bool set_layer_edr(void *metal_layer, bool enabled) {
+bool set_layer_output(void *metal_layer, int mode) {
 	if (metal_layer == nullptr) {
 		return false;
 	}
 
 	CAMetalLayer *layer = (CAMetalLayer *)metal_layer;
 
-	if (enabled) {
+	if (mode == LAYER_OUTPUT_EDR) {
 		layer.pixelFormat = MTLPixelFormatRGBA16Float;
 		layer.wantsExtendedDynamicRangeContent = YES;
 
-		// Extended-linear, not the display's own space.
-		//
-		// The SDR path tags the layer with the display profile and writes linear
-		// values into it, so the compositor passes them through unconverted --
-		// which reproduces what the OpenGL build did, and is why every shader in
-		// the tree omits the transfer function. Here the tag says what the
-		// values actually are, so the compositor converts properly and the
-		// midtones come out brighter than the SDR path shows them. That is the
-		// correct picture, not a bug, and it is confined to this path because
-		// fixing it everywhere means touching every shader.
 		CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
 		if (cs == NULL) {
 			return false;
 		}
 		layer.colorspace = cs;
 		CGColorSpaceRelease(cs);
-
 		return true;
 	}
 
-	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 	layer.wantsExtendedDynamicRangeContent = NO;
 
-	// Back to the display profile; see attach_metal_layer.
+	if (mode == LAYER_OUTPUT_SRGB) {
+		// The GPU applies the transfer function on write, so no shader changes
+		// hands: a fragment still returns linear light and the ROP encodes it.
+		// Blending and MSAA resolve decode, work in linear, and re-encode --
+		// which is the part a per-shader pow() could never fix.
+		layer.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+
+		CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+		if (cs == NULL) {
+			return false;
+		}
+		layer.colorspace = cs;
+		CGColorSpaceRelease(cs);
+		return true;
+	}
+
+	// Legacy: unencoded values tagged as already being in the display's space,
+	// so nothing converts them. See the enum in PSIMetalLayer.h.
+	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+
 	NSScreen *screen = [NSScreen mainScreen];
 	if (screen != nil && screen.colorSpace.CGColorSpace != NULL) {
 		layer.colorspace = screen.colorSpace.CGColorSpace;

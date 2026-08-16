@@ -38,23 +38,36 @@ void set_layer_display_sync(void *metal_layer, bool enabled);
 // flipped once, on demand, when a screenshot is first requested.
 void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only);
 
-// Switches the layer between ordinary 8-bit output and extended dynamic range.
+// How the drawable's numbers are meant to be read.
 //
-// EDR means three things at once, and all three have to move together:
+// Every shader in this tree writes linear light values. What differs between
+// these is what the compositor is told about them.
 //
-//   * the drawable becomes RGBA16Float, so a value can exceed 1.0 at all;
-//   * wantsExtendedDynamicRangeContent tells the compositor to honour those
-//     values instead of clipping them at SDR white;
-//   * the colour space becomes extendedLinearDisplayP3, where 1.0 IS SDR white
-//     and the numbers above it are real luminance headroom.
+//   LEGACY  8-bit, tagged with the display's own space, so Core Animation
+//           passes the values through unconverted and the panel applies its own
+//           ~2.2 gamma to numbers that were never encoded. Displayed luminance
+//           ends up proportional to L^2.2 rather than L. This is wrong, and it
+//           is what the OpenGL build did, so it is the default until each demo
+//           has been retuned off it.
 //
-// That last one also fixes, for this path only, the "sampled once at attach"
-// problem the ordinary path has: extendedLinearDisplayP3 is an absolute space,
-// so the compositor converts it correctly for whichever display the window is
-// on. Dragging between screens needs no re-tagging.
+//   SRGB    8-bit sRGB, so the GPU encodes on write -- in the ROP, for free --
+//           and blending and MSAA resolve happen in linear and are written back
+//           correctly. Tagged sRGB, which is what the demos' colours and
+//           textures are authored in, so Core Animation converts properly for a
+//           P3 panel instead of oversaturating.
 //
-// Returns true if the layer is now in the requested state.
-bool set_layer_edr(void *metal_layer, bool enabled);
+//   EDR     RGBA16Float in extendedLinearDisplayP3: linear all the way, and
+//           values above 1.0 become headroom above SDR white. Already colour
+//           managed by construction, which is why the EDR path looks brighter
+//           than the LEGACY one at the same headroom.
+enum LayerOutput {
+	LAYER_OUTPUT_LEGACY = 0,
+	LAYER_OUTPUT_SRGB   = 1,
+	LAYER_OUTPUT_EDR    = 2,
+};
+
+// Returns true if the layer is in the requested mode afterwards.
+bool set_layer_output(void *metal_layer, int mode);
 
 // How much brighter than SDR white this window's display can currently go.
 //

@@ -242,6 +242,16 @@ class PSIMetalContext {
 		bool enable_edr_output(bool enabled);
 		bool edr_output() const { return _edr_output; }
 
+		// Colour-managed output: the drawable becomes 8-bit sRGB, so the linear
+		// values every shader writes are encoded on write instead of being
+		// handed to the panel raw. Off by default, because the demos' colours
+		// and light intensities were all tuned against the unmanaged transform
+		// and each one has to be retuned as it moves across.
+		//
+		// Same timing rule as EDR: before any pass is created.
+		bool enable_color_managed(bool enabled);
+		bool color_managed() const { return _color_managed; }
+
 		// The current display's headroom above SDR white, 1.0 if there is none.
 		// Polled rather than cached: macOS moves it with brightness and thermal
 		// state, and with the window's screen. See PSIMetalLayer.h.
@@ -289,6 +299,10 @@ class PSIMetalContext {
 		// enable_edr_output().
 		MTL::PixelFormat _color_format = MTL::PixelFormatBGRA8Unorm;
 		bool _edr_output = false;
+		bool _color_managed = false;
+
+		// Resolves the two flags above into one layer configuration.
+		bool apply_output_mode();
 
 		// Depth buffer, recreated whenever the drawable size changes. The layer
 		// only provides colour.

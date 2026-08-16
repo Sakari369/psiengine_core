@@ -134,6 +134,31 @@ class PSIVideo {
 			return _metal_ctx != nullptr && _metal_ctx->edr_output();
 		}
 
+		// Colour-managed output. Off by default; opt in with
+		// psi.boot { color_managed = true }.
+		//
+		// Every shader writes linear light. Unmanaged, those values are handed
+		// to the panel unencoded and it applies its own ~2.2 gamma, so what you
+		// see is L^2.2 -- a surface lit to 0.5 displays at 0.22, MSAA resolves
+		// edges too dark, and two lights at 0.5 do not add up to one at 1.0.
+		// Managed, the GPU encodes on write and all of that is correct.
+		//
+		// Off by default because it is a look change, not a bug fix in
+		// isolation: every demo's colours and light intensities were chosen
+		// against the broken transform, so a script has to be retuned in the
+		// same commit that turns this on.
+		//
+		// Same timing rule as HDR: before any pass is created.
+		bool set_color_managed(bool enabled) {
+			if (_metal_ctx == nullptr) {
+				return false;
+			}
+			return _metal_ctx->enable_color_managed(enabled);
+		}
+		bool get_color_managed() const {
+			return _metal_ctx != nullptr && _metal_ctx->color_managed();
+		}
+
 		// How much brighter than SDR white the current display can go: 1.0 with
 		// no headroom, up to about 16 on an XDR panel.
 		//
