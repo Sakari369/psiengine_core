@@ -184,6 +184,14 @@ class PSIGLShader {
 		}
 
 		// Setting different type uniform values, by resolved index.
+		// The u_params tuning channel; see psi_common.h. Named rather than
+		// exposing set_uniform generically to Lua, because every other uniform
+		// in the block is owned by the renderer and writing one from a script
+		// would be fighting it.
+		void set_params(const glm::vec4 &params) {
+			set_uniform("u_params", params);
+		}
+
 		void set_uniform(GLuint location, const GLint &val);
 		void set_uniform(GLuint location, const GLuint &val);
 		void set_uniform(GLuint location, const GLfloat &val);
