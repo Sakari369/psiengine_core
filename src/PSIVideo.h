@@ -202,6 +202,12 @@ class PSIVideo {
 		// application, not psicore) -- same split as set_cursor_mode_changed_cb().
 		// Pair it with PSI_FIXED_FRAMETIME so frame n holds the same content on
 		// every run. Does nothing unless the variable is set.
+		// Is a deterministic capture configured? main.cpp uses this to stop the
+		// mouse reaching the camera, so a stray nudge cannot change the frame.
+		bool is_capturing() const {
+			return _capture_frame > 0;
+		}
+
 		void set_capture_frame_cb(std::function<void()> cb) {
 			_on_capture_frame = std::move(cb);
 		}
