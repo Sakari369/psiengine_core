@@ -265,4 +265,28 @@ class PSIGLMesh {
 		GLuint bound_name_for(GLenum target) const;
 		// This frame's slot in the rotating buffers.
 		static int current_slot();
+
+		// Complain when a rotating buffer is filled twice within one frame.
+		//
+		// The rotation gives every in-flight frame its own copy, so the CPU
+		// never overwrites data the GPU is still reading for an earlier frame.
+		// It cannot help within a frame: two passes that draw this mesh with
+		// different data both read whichever write landed last, because they
+		// share one buffer in one command buffer.
+		//
+		// That was unreachable while a frame was a single pass. It is reachable
+		// now, it is silent, and the picture it produces looks plausible -- so
+		// it is worth saying out loud. Fixing it properly means a transient
+		// per-draw allocator, which is a separate piece of work.
+		//
+		// Warns once per mesh per kind, so a scene that does this everywhere
+		// does not drown the log.
+		void warn_double_write(const char *what, bool &already_warned);
+
+		// Frame each rotating buffer was last uploaded in; see
+		// warn_double_write(). UINT64_MAX so frame 0 is not a false positive.
+		uint64_t _color_upload_frame = UINT64_MAX;
+		uint64_t _instance_upload_frame = UINT64_MAX;
+		bool _warned_color_double_write = false;
+		bool _warned_instance_double_write = false;
 };

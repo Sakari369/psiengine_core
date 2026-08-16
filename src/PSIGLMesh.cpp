@@ -73,6 +73,19 @@ PSIGLMesh::~PSIGLMesh() {
 	}
 }
 
+void PSIGLMesh::warn_double_write(const char *what, bool &already_warned) {
+	if (already_warned) {
+		return;
+	}
+	already_warned = true;
+
+	psilog_err("Mesh %s buffer written twice in one frame. Both passes will "
+	           "draw the LAST value written, because they share one buffer in "
+	           "one command buffer -- the per-frame rotation cannot separate "
+	           "writes within a frame. Draw the two versions from two meshes, "
+	           "or move the second write to the next frame.", what);
+}
+
 int PSIGLMesh::current_slot() {
 	if (PSI_G::metal_ctx == nullptr) {
 		return 0;
@@ -324,6 +337,15 @@ void PSIGLMesh::upload_instances() {
 		return;
 	}
 
+	// Past this point an upload is definitely happening, and the only way to
+	// reach it twice in one frame is for the data to have changed in between.
+	const uint64_t frame = (PSI_G::metal_ctx != nullptr)
+		? PSI_G::metal_ctx->frame_counter() : 0;
+	if (_instance_upload_frame == frame) {
+		warn_double_write("instance", _warned_instance_double_write);
+	}
+	_instance_upload_frame = frame;
+
 	const size_t bytes = _instances.size() * sizeof(instance_data);
 	if (bytes == 0) {
 		if (_instance_buffers[slot] != nullptr) {
@@ -394,6 +416,12 @@ MTL::Buffer *PSIGLMesh::color_buffer_for_slot(int slot) {
 	if (size == 0) {
 		return _buffers[BufferName::COLOR];
 	}
+
+	const uint64_t frame = PSI_G::metal_ctx->frame_counter();
+	if (_color_upload_frame == frame) {
+		warn_double_write("colour", _warned_color_double_write);
+	}
+	_color_upload_frame = frame;
 
 	if (_color_buffers[slot] != nullptr && _color_buffers[slot]->length() < size) {
 		_color_buffers[slot]->release();

@@ -429,9 +429,36 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 
 	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::alloc()->init();
 
+	// Is this pass multisampled? If so its colour attachment is the
+	// multisampled texture, which is memoryless and resolves into the real one
+	// as the pass ends.
+	const bool multisampled = to_drawable
+		? (_msaa_texture != nullptr)
+		: (target->resolve_attachment() != nullptr);
+
 	MTL::LoadAction load = MTL::LoadActionClear;
 	if (pass.get_load_action() == PSIRenderPass::LOAD_KEEP) {
-		load = MTL::LoadActionLoad;
+		if (multisampled) {
+			// Cannot be honoured, and honouring it halfway would be worse than
+			// refusing: the attachment being loaded is the MSAA texture, which
+			// lives only in tile memory and is resolved away at the end of
+			// every pass. There is nothing there to load, and asking anyway is
+			// a validation error.
+			//
+			// Keeping contents needs a single-sampled pass -- which is what an
+			// accumulation or feedback pass wants regardless, since it reads
+			// its own previous output.
+			static bool warned = false;
+			if (!warned) {
+				warned = true;
+				psilog_err("Render pass asked to keep its contents but is "
+				           "multisampled; its colour attachment is memoryless "
+				           "and has nothing to keep. Clearing instead -- give "
+				           "the pass a render target with samples = 1.");
+			}
+		} else {
+			load = MTL::LoadActionLoad;
+		}
 	} else if (pass.get_load_action() == PSIRenderPass::LOAD_DISCARD) {
 		load = MTL::LoadActionDontCare;
 	}
