@@ -261,7 +261,8 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	const auto &shader = get_shader_ref();
 	const auto &mesh = get_gl_mesh_ref();
 	const auto &material = get_render_asset().material;
-	const bool has_texture = material->has_texture();
+	// Only read by the assert below, which compiles out in release builds.
+	[[maybe_unused]] const bool has_texture = material->has_texture();
 
 	// TODO: are these required ?
 	assert(shader != nullptr);

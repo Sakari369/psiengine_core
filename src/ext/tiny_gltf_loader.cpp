@@ -772,10 +772,12 @@ static bool ParseAsset(Asset *asset, std::string *err,
   picojson::object::const_iterator profile = o.find("profile");
   if (profile != o.end()) {
     const picojson::value &v = profile->second;
-    if (v.contains("api") & v.get("api").is<std::string>()) {
+    // PSIEngine local change: '&' -> '&&'. Non-short-circuiting '&' evaluated
+    // v.get(key) even when the key was absent; && is what was meant.
+    if (v.contains("api") && v.get("api").is<std::string>()) {
       asset->profile_api = v.get("api").get<std::string>();
     }
-    if (v.contains("version") & v.get("version").is<std::string>()) {
+    if (v.contains("version") && v.get("version").is<std::string>()) {
       asset->profile_version = v.get("version").get<std::string>();
     }
   }

@@ -24,9 +24,6 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	assert(shader != nullptr);
 	const PSIGLShader::hot_uniforms &hot = shader->hot();
 
-	MTL::RenderCommandEncoder *encoder =
-		(PSI_G::metal_ctx != nullptr) ? PSI_G::metal_ctx->encoder() : nullptr;
-
 	// Are we rendering as wireframe ?
 	//
 	// ctx->wireframe used to be ORed in here. It was never bound to Lua and

@@ -184,9 +184,12 @@ _MTL_INLINE const MTL::PackedFloat3& MTL::PackedFloat4x3::operator[](int idx) co
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+// PSIEngine local change: the INFINITY macro trips -Wnan-infinity-disabled when
+// the translation unit is built with -ffast-math (which implies -ffinite-math-only).
+// __builtin_inff() materialises the same bit pattern without the diagnostic.
 _MTL_INLINE MTL::AxisAlignedBoundingBox::AxisAlignedBoundingBox()
-    : min(INFINITY, INFINITY, INFINITY)
-    , max(-INFINITY, -INFINITY, -INFINITY)
+    : min(__builtin_inff(), __builtin_inff(), __builtin_inff())
+    , max(-__builtin_inff(), -__builtin_inff(), -__builtin_inff())
 {
 }
 
