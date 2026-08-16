@@ -61,10 +61,23 @@ PSIGLMesh::~PSIGLMesh() {
 			_buffers[i] = nullptr;
 		}
 	}
-	if (_instance_buffer != nullptr) {
-		_instance_buffer->release();
-		_instance_buffer = nullptr;
+	for (int i = 0; i < FRAME_SLOTS; i++) {
+		if (_instance_buffers[i] != nullptr) {
+			_instance_buffers[i]->release();
+			_instance_buffers[i] = nullptr;
+		}
+		if (_color_buffers[i] != nullptr) {
+			_color_buffers[i]->release();
+			_color_buffers[i] = nullptr;
+		}
 	}
+}
+
+int PSIGLMesh::current_slot() {
+	if (PSI_G::metal_ctx == nullptr) {
+		return 0;
+	}
+	return (int)PSI_G::metal_ctx->frame_slot();
 }
 
 bool PSIGLMesh::init() {
@@ -210,16 +223,28 @@ void PSIGLMesh::flush_current_uniforms() {
 }
 
 void PSIGLMesh::bind_vertex_buffers(MTL::RenderCommandEncoder *encoder) {
+	const int slot = current_slot();
+
 	for (GLuint i = 0; i < BufferName::INDEX; i++) {
-		if (_buffers[i] == nullptr || !_attrib_enabled[i]) {
+		if (!_attrib_enabled[i]) {
 			continue;
 		}
-		encoder->setVertexBuffer(_buffers[i], 0, i);
+
+		// The colour buffer rotates once a script starts animating it; every
+		// other attribute is written at load and shared across frames.
+		MTL::Buffer *buffer = (i == BufferName::COLOR)
+			? color_buffer_for_slot(slot)
+			: _buffers[i];
+
+		if (buffer == nullptr) {
+			continue;
+		}
+		encoder->setVertexBuffer(buffer, 0, i);
 	}
 
 	// The instance array sits well clear of the attribute slots, at 18.
-	if (_instance_buffer != nullptr) {
-		encoder->setVertexBuffer(_instance_buffer, 0, PSIMetal::BUFFER_INSTANCE_DATA);
+	if (_instance_buffers[slot] != nullptr) {
+		encoder->setVertexBuffer(_instance_buffers[slot], 0, PSIMetal::BUFFER_INSTANCE_DATA);
 	}
 }
 
@@ -229,7 +254,7 @@ void PSIGLMesh::set_instance_count(GLuint count) {
 	}
 
 	_instances.resize(count);
-	_instances_dirty = true;
+	_instances_version++;
 }
 
 void PSIGLMesh::set_instance_matrix(GLuint index, const glm::mat4 &model) {
@@ -239,7 +264,7 @@ void PSIGLMesh::set_instance_matrix(GLuint index, const glm::mat4 &model) {
 	}
 
 	_instances[index].model = model;
-	_instances_dirty = true;
+	_instances_version++;
 }
 
 void PSIGLMesh::set_instance_transform(GLuint index, PSIGLTransform &transform) {
@@ -253,7 +278,7 @@ void PSIGLMesh::set_instance_color(GLuint index, const glm::vec4 &color) {
 	}
 
 	_instances[index].color = color;
-	_instances_dirty = true;
+	_instances_version++;
 }
 
 void PSIGLMesh::set_instance_custom(GLuint index, const glm::vec4 &custom) {
@@ -263,7 +288,7 @@ void PSIGLMesh::set_instance_custom(GLuint index, const glm::vec4 &custom) {
 	}
 
 	_instances[index].custom = custom;
-	_instances_dirty = true;
+	_instances_version++;
 }
 
 void PSIGLMesh::set_instance(GLuint index, PSIGLTransform &transform,
@@ -276,49 +301,119 @@ void PSIGLMesh::set_instance(GLuint index, PSIGLTransform &transform,
 	_instances[index].model = transform.get_model();
 	_instances[index].color = color;
 	_instances[index].custom = custom;
-	_instances_dirty = true;
+	_instances_version++;
 }
 
 void PSIGLMesh::upload_instances() {
-	if (!_instances_dirty) {
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
 		return;
 	}
-	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+
+	const int slot = current_slot();
+
+	// Per slot rather than one global dirty flag.
+	//
+	// The buffer is Shared storage written from inside draw(), so writing this
+	// frame's data into the buffer the GPU is reading for frames N-1 and N-2 is
+	// a genuine race. Each in-flight frame gets its own copy, and a slot is
+	// refreshed when it is behind the current data -- so a single
+	// set_instance() at setup still reaches all three, not just the one that
+	// happened to be current at the time.
+	if (_instance_slot_version[slot] == _instances_version &&
+	    _instance_buffers[slot] != nullptr) {
 		return;
 	}
 
 	const size_t bytes = _instances.size() * sizeof(instance_data);
 	if (bytes == 0) {
-		if (_instance_buffer != nullptr) {
-			_instance_buffer->release();
-			_instance_buffer = nullptr;
+		if (_instance_buffers[slot] != nullptr) {
+			_instance_buffers[slot]->release();
+			_instance_buffers[slot] = nullptr;
 		}
-		_instances_dirty = false;
+		_instance_slot_version[slot] = _instances_version;
 		return;
 	}
 
 	// Reuse the buffer when it is still big enough; per-frame instance updates
 	// then cost a memcpy rather than an allocation.
-	if (_instance_buffer != nullptr && _instance_buffer->length() < bytes) {
-		_instance_buffer->release();
-		_instance_buffer = nullptr;
+	if (_instance_buffers[slot] != nullptr && _instance_buffers[slot]->length() < bytes) {
+		_instance_buffers[slot]->release();
+		_instance_buffers[slot] = nullptr;
 	}
 
-	if (_instance_buffer == nullptr) {
-		_instance_buffer = PSI_G::metal_ctx->device()->newBuffer(
+	if (_instance_buffers[slot] == nullptr) {
+		_instance_buffers[slot] = PSI_G::metal_ctx->device()->newBuffer(
 			bytes, MTL::ResourceStorageModeShared);
 
-		if (_instance_buffer == nullptr) {
+		if (_instance_buffers[slot] == nullptr) {
 			psilog_err("Failed allocating instance buffer for %zu instances", _instances.size());
 			return;
 		}
 
-		psilog(PSILog::OPENGL, "Allocated instance buffer for %zu instances (%zu bytes)",
-		       _instances.size(), bytes);
+		psilog(PSILog::OPENGL, "Allocated instance buffer slot %d for %zu instances (%zu bytes)",
+		       slot, _instances.size(), bytes);
 	}
 
-	std::memcpy(_instance_buffer->contents(), _instances.data(), bytes);
-	_instances_dirty = false;
+	std::memcpy(_instance_buffers[slot]->contents(), _instances.data(), bytes);
+	_instance_slot_version[slot] = _instances_version;
+}
+
+void PSIGLMesh::update_color_data(const GLvoid *data, GLsizeiptr size) {
+	if (data == nullptr || size <= 0) {
+		return;
+	}
+
+	// Keep the CPU copy. The GPU-side upload happens per slot in
+	// color_buffer_for_slot(), because only the current slot may be written --
+	// with three frames in flight and three slots, the other two are exactly
+	// the ones the GPU is still reading.
+	const uint8_t *bytes = static_cast<const uint8_t *>(data);
+	_color_data.assign(bytes, bytes + size);
+	_color_version++;
+	_color_rotating = true;
+
+	// The colour attribute counts as present even if the static COLOR buffer
+	// was never filled.
+	_attrib_enabled[BufferName::COLOR] = true;
+}
+
+MTL::Buffer *PSIGLMesh::color_buffer_for_slot(int slot) {
+	if (!_color_rotating) {
+		return _buffers[BufferName::COLOR];
+	}
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		return _buffers[BufferName::COLOR];
+	}
+
+	// Up to date already.
+	if (_color_buffers[slot] != nullptr && _color_slot_version[slot] == _color_version) {
+		return _color_buffers[slot];
+	}
+
+	const size_t size = _color_data.size();
+	if (size == 0) {
+		return _buffers[BufferName::COLOR];
+	}
+
+	if (_color_buffers[slot] != nullptr && _color_buffers[slot]->length() < size) {
+		_color_buffers[slot]->release();
+		_color_buffers[slot] = nullptr;
+	}
+
+	if (_color_buffers[slot] == nullptr) {
+		_color_buffers[slot] = PSI_G::metal_ctx->device()->newBuffer(
+			(NS::UInteger)size, MTL::ResourceStorageModeShared);
+
+		if (_color_buffers[slot] == nullptr) {
+			psilog_err("Failed allocating %zu byte colour buffer slot %d", size, slot);
+			return _buffers[BufferName::COLOR];
+		}
+	}
+
+	std::memcpy(_color_buffers[slot]->contents(), _color_data.data(), size);
+	_color_slot_version[slot] = _color_version;
+
+	return _color_buffers[slot];
 }
 
 void PSIGLMesh::draw() {

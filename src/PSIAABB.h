@@ -13,6 +13,8 @@ class PSIAABB {
 	private:
 		glm::vec3 _min = glm::vec3(-0.5f, -0.5f, -0.5f);
 		glm::vec3 _max = glm::vec3(0.5f, 0.5f, 0.5f);
+		// See is_valid().
+		bool _valid = false;
 
 	public:
 		PSIAABB() = default;
@@ -28,9 +30,28 @@ class PSIAABB {
 		void scale_to(glm::vec3 scaling);
 		void translate_to(glm::vec3 translation);
 
-		void set_min(glm::vec3 min) { _min = min; }
+		void set_min(glm::vec3 min) { _min = min; _valid = true; }
 		glm::vec3 get_min() { return _min; }
 
-		void set_max(glm::vec3 max) { _max = max; }
+		void set_max(glm::vec3 max) { _max = max; _valid = true; }
 		glm::vec3 get_max() { return _max; }
+
+		// Do _min/_max describe real geometry, or are they still the default
+		// unit cube?
+		//
+		// This matters because the default is not a conservative bound -- it is
+		// smaller than most meshes. Frustum culling against it would discard a
+		// 512-unit star ray as if it were one unit across, so anything that
+		// culls has to check this first. PSIRenderObj fills the box in from
+		// PSIGeometryData::positions when geometry is attached.
+		bool is_valid() const { return _valid; }
+
+		void set_bounds(const glm::vec3 &min, const glm::vec3 &max) {
+			_min = min;
+			_max = max;
+			_valid = true;
+		}
+
+		glm::vec3 get_center() const { return (_min + _max) * 0.5f; }
+		glm::vec3 get_extent() const { return (_max - _min) * 0.5f; }
 };

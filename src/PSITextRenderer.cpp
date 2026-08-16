@@ -258,10 +258,10 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 		return;
 	}
 
-	auto shader = get_shader();
-	auto mesh = get_gl_mesh();
-	auto material = get_material();
-	auto texture = material->get_texture();
+	const auto &shader = get_shader_ref();
+	const auto &mesh = get_gl_mesh_ref();
+	const auto &material = get_render_asset().material;
+	const auto &texture = material->texture_ref();
 
 	// TODO: are these required ?
 	assert(shader != nullptr);
@@ -280,12 +280,12 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	}
 
 	STACK_PUSH(ctx->model);
-		auto asset = get_render_asset();
-		calc_model_view_projection(ctx, asset.transform);
+		calc_model_view_projection(ctx, get_render_asset().transform);
 
+		const PSIGLShader::hot_uniforms &hot = shader->hot();
 		shader->set_uniform("u_diffuse", 0);
-		shader->set_uniform("u_model_view_projection_matrix", get_model_view_projection_matrix());
-		shader->set_uniform("u_color", material->get_color());
+		shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
+		shader->set_uniform(hot.color, material->get_color());
 
 		// We are not offsetting or setting custom draw count, just draw text as is.
 		if (_draw_offset == -1 && _draw_count == -1) {

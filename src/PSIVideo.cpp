@@ -2,7 +2,19 @@
 
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
-const GLint PSIVideo::DEF_MSAA_SAMPLES = 8;
+// 2, not 8.
+//
+// The device caps this at 4 for BGRA8 anyway, so 8 only ever meant "as much as
+// you have". With the depth and MSAA colour targets memoryless they live in
+// tile memory, and tile memory is the constraint: 4x MSAA needs 4 bytes of
+// colour plus 4 of depth per sample, 32 bytes per pixel, which is the whole
+// 32 KB budget for a 32x32 tile and forces the driver to use smaller tiles.
+// 2x halves that and leaves room.
+//
+// Edges do not suffer much because the frame is also 2x supersampled and box
+// filtered on composite (PSIMetalContext::set_supersample_factor). -a/--antialias
+// still overrides this.
+const GLint PSIVideo::DEF_MSAA_SAMPLES = 2;
 
 PSIVideo::~PSIVideo() {
 }
@@ -144,7 +156,69 @@ bool PSIVideo::init() {
 	}
 	glfwSetCursorPos(_window, 0, 0);
 
+	// Frame time benchmark; see PSIVideo::_bench_frames.
+	const char *bench_env = getenv("PSI_BENCH_FRAMES");
+	if (bench_env != nullptr) {
+		_bench_frames = atoi(bench_env);
+		if (_bench_frames > 0) {
+			_bench_samples.reserve(_bench_frames);
+			psilog(PSILog::VIDEO, "Benchmarking %d frames", _bench_frames);
+			if (_vsync) {
+				psilog_err("PSI_BENCH_FRAMES with vsync on measures the display, "
+				           "not the renderer -- pass -n");
+			}
+		}
+	}
+
+	// Frame capture harness; see PSIVideo::set_capture_frame_cb().
+	const char *capture_env = getenv("PSI_CAPTURE_FRAME");
+	if (capture_env != nullptr) {
+		_capture_frame = atoi(capture_env);
+		if (_capture_frame > 0) {
+			psilog(PSILog::VIDEO, "Will capture frame %d and exit", _capture_frame);
+		}
+	}
+
 	return true;
+}
+
+void PSIVideo::bench_sample() {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	double now_ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+
+	if (_bench_last_ms > 0.0) {
+		_bench_samples.push_back(now_ms - _bench_last_ms);
+	}
+	_bench_last_ms = now_ms;
+
+	if ((GLint)_bench_samples.size() < _bench_frames) {
+		return;
+	}
+
+	// Drop the first 10% as warm-up: shader compilation, texture upload and the
+	// first few drawable acquisitions all land in the opening frames.
+	size_t warmup = _bench_samples.size() / 10;
+	std::vector<double> s(_bench_samples.begin() + warmup, _bench_samples.end());
+	std::sort(s.begin(), s.end());
+
+	double sum = 0.0;
+	for (double v : s) {
+		sum += v;
+	}
+	double mean = sum / (double)s.size();
+	double p50 = s[s.size() / 2];
+	double p95 = s[(size_t)((double)s.size() * 0.95)];
+	double max = s.back();
+
+	double gpu_ms = (_metal_ctx != nullptr) ? _metal_ctx->gpu_time_mean_ms() : 0.0;
+
+	printf("frames=%zu  gpu=%.3f ms  wall mean=%.3f p50=%.3f p95=%.3f max=%.3f ms\n",
+	       s.size(), gpu_ms, mean, p50, p95, max);
+	fflush(stdout);
+
+	set_window_should_close();
+	_bench_frames = 0;
 }
 
 void PSIVideo::set_opengl_window_hints() {

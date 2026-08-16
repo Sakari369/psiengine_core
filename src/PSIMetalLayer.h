@@ -30,4 +30,12 @@ void set_layer_drawable_size(void *metal_layer, int width, int height);
 // glfwSwapInterval).
 void set_layer_display_sync(void *metal_layer, bool enabled);
 
+// Allows or forbids using the drawable as anything other than a render target.
+//
+// framebufferOnly = YES lets the GPU keep the drawable losslessly compressed for
+// the whole frame, which is bandwidth the tile memory does not have to spend.
+// It has to be turned off before the drawable can be a blit source, so this is
+// flipped once, on demand, when a screenshot is first requested.
+void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only);
+
 } // namespace PSIMetal

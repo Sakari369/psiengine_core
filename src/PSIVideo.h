@@ -104,6 +104,41 @@ class PSIVideo {
 			if (_metal_ctx != nullptr) {
 				_metal_ctx->present();
 			}
+
+			// Benchmark hook. See _bench_frames.
+			if (_bench_frames > 0) {
+				bench_sample();
+			}
+
+			// Verification hook. See set_capture_frame_cb().
+			if (_capture_frame <= 0) {
+				return;
+			}
+			_frames_presented++;
+			if (_frames_presented == 1 && _metal_ctx != nullptr) {
+				// Arm now so the target frame's drawable is readable; arming
+				// only affects drawables vended afterwards.
+				_metal_ctx->arm_capture();
+			}
+			if (_frames_presented == _capture_frame) {
+				if (_on_capture_frame) {
+					_on_capture_frame();
+				}
+				// The script's loop still finishes its iteration and flips
+				// again, so this must not re-fire.
+				set_window_should_close();
+			}
+		}
+
+		// Writes one frame to disk and closes the window, for A/B pixel diffs.
+		//
+		// PSI_CAPTURE_FRAME=<n> picks the frame; the callback does the writing,
+		// because the image encoders live in PSIGLRenderer (which is in the
+		// application, not psicore) -- same split as set_cursor_mode_changed_cb().
+		// Pair it with PSI_FIXED_FRAMETIME so frame n holds the same content on
+		// every run. Does nothing unless the variable is set.
+		void set_capture_frame_cb(std::function<void()> cb) {
+			_on_capture_frame = std::move(cb);
 		}
 
 		void poll_events() {
@@ -237,6 +272,25 @@ class PSIVideo {
 
 		// Notified after every cursor mode change; see set_cursor_mode_changed_cb().
 		std::function<void()> _on_cursor_mode_changed;
+
+		// Frame capture harness; see set_capture_frame_cb(). 0 = disabled.
+		GLint _capture_frame = 0;
+		GLint _frames_presented = 0;
+		std::function<void()> _on_capture_frame;
+
+		// Frame time benchmark: PSI_BENCH_FRAMES=<n> measures the wall clock
+		// between presents for n frames, prints mean / p95 / max and exits.
+		//
+		// It lives here rather than in a script because flip() is called exactly
+		// once per displayed frame by all 18 of them, so every demo becomes a
+		// benchmark with no edit. Most of them drive a fixed timestep and would
+		// otherwise report a constant frametime no matter what the renderer does.
+		//
+		// Run it with -n (vsync off), or it measures the display refresh.
+		GLint _bench_frames = 0;
+		std::vector<double> _bench_samples;
+		double _bench_last_ms = 0.0;
+		void bench_sample();
 
 		// Resolve visibility, capture and focus into GLFW's tri-state cursor mode.
 		void apply_cursor_mode() {

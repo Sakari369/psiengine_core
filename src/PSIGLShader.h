@@ -82,6 +82,38 @@ class PSIGLShader {
 			return make_shared<PSIGLShader>();
 		}
 
+		// The uniforms the draw path writes on every object, every frame.
+		//
+		// set_uniform(name, value) hashes an std::unordered_map key built from a
+		// string literal at the call site. "u_model_view_projection_matrix" is 30
+		// characters, past libc++'s 22-character short-string buffer, so each of
+		// those calls was a malloc and a free -- per draw. These are resolved once
+		// in compile() and the draw path uses the by-location overloads instead.
+		//
+		// Any member a given shader does not declare stays INVALID_UNIFORM, and
+		// every by-location setter bounds-checks, so writing through one is a
+		// silent no-op exactly as the name-based path was.
+		struct hot_uniforms {
+			GLuint mvp_matrix        = (GLuint)INVALID_UNIFORM;
+			GLuint model_matrix      = (GLuint)INVALID_UNIFORM;
+			GLuint view_matrix       = (GLuint)INVALID_UNIFORM;
+			GLuint projection_matrix = (GLuint)INVALID_UNIFORM;
+			GLuint normal_matrix     = (GLuint)INVALID_UNIFORM;
+			GLuint color             = (GLuint)INVALID_UNIFORM;
+			GLuint elapsed_time      = (GLuint)INVALID_UNIFORM;
+
+			GLuint ambient_color     = (GLuint)INVALID_UNIFORM;
+			GLuint ambient_intensity = (GLuint)INVALID_UNIFORM;
+			GLuint light_pos         = (GLuint)INVALID_UNIFORM;
+			GLuint light_color       = (GLuint)INVALID_UNIFORM;
+			GLuint light_intensity   = (GLuint)INVALID_UNIFORM;
+			GLuint light_dir         = (GLuint)INVALID_UNIFORM;
+		};
+
+		const hot_uniforms &hot() const {
+			return _hot;
+		}
+
 		// A uniform resolved by reflection: where it lives in the block and how
 		// to convert the CPU-side glm type into Metal's layout.
 		struct uniform_member {
@@ -114,7 +146,13 @@ class PSIGLShader {
 		}
 
 		// Make this shader's pipeline state current on the active encoder.
-		void use_program();
+		//
+		// Blending is baked into a Metal pipeline, so a shader that has to be
+		// available both ways needs two of them. compile() builds both and this
+		// picks one; blended is the default because that is what the GL renderer
+		// did globally, and it is the only safe answer without knowing the
+		// material. See PSIGLMaterial::set_blending().
+		void use_program(bool blended = true);
 
 		// Return this uniform's index, or INVALID_UNIFORM if the shader has no
 		// such uniform.
@@ -213,7 +251,12 @@ class PSIGLShader {
 
 	private:
 		// Our pipeline state, the Metal equivalent of a linked program.
+		// This one has blending enabled; it is the fallback for everything.
 		MTL::RenderPipelineState *_pipeline = nullptr;
+		// The same pipeline with blending off, built from the same descriptor.
+		// Null if it failed to build, in which case use_program() falls back to
+		// the blended one -- correct, just slower.
+		MTL::RenderPipelineState *_pipeline_opaque = nullptr;
 
 		// Entry points selected by add_from_file().
 		MTL::Function *_vertex_fn = nullptr;
@@ -237,6 +280,18 @@ class PSIGLShader {
 		// Uniform name -> index into _uniform_members.
 		std::unordered_map<std::string, GLuint> _uniforms;
 		std::vector<uniform_member> _uniform_members;
+
+		// Per-draw uniform locations, resolved once. See hot_uniforms.
+		hot_uniforms _hot;
+		void resolve_hot_uniforms();
+
+		// Does the fragment function actually bind the uniform block?
+		//
+		// Both stages were handed the same block unconditionally, but reflection
+		// already reports which of them asked for it -- fragment_text, for one,
+		// does not declare PSIUniforms at all. Skipping the push for those halves
+		// the uniform traffic of every draw that uses them.
+		bool _fragment_has_uniforms = false;
 
 		// CPU-side staging copy of the uniform block, uploaded per draw.
 		std::vector<uint8_t> _uniform_data;

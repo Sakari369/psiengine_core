@@ -15,10 +15,14 @@ PSIRenderObj::PSIRenderObj(const PSIRenderObj &rhs) :  _mvp(rhs._mvp),
 
 // Drawing method for drawing general render objects.
 void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
-	auto shader = get_shader();
-	assert(shader != nullptr);
-	auto material = get_material();
+	// References throughout: every by-value shared_ptr getter in this function
+	// used to be a pair of atomic refcount operations, on every object of every
+	// frame. The object owns all of these for the duration of the call.
+	const auto &material = _render_asset.material;
 	assert(material != nullptr);
+	const auto &shader = material->shader_ref();
+	assert(shader != nullptr);
+	const PSIGLShader::hot_uniforms &hot = shader->hot();
 
 	MTL::RenderCommandEncoder *encoder =
 		(PSI_G::metal_ctx != nullptr) ? PSI_G::metal_ctx->encoder() : nullptr;
@@ -44,7 +48,7 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	}
 
 	// Get our rendering assets.
-	auto asset = get_render_asset();
+	render_asset &asset = get_render_asset();
 
 	// Update mesh color data if material needs update.
 	if (material->needs_update() == true) {
@@ -53,19 +57,23 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		glm::vec4 color = material->get_color();
 		std::fill(_geometry_data->colors.begin(), _geometry_data->colors.end(), color);
 
-		auto mesh = get_gl_mesh();
+		const auto &mesh = get_gl_mesh_ref();
 		if (mesh != nullptr) {
 			//psilog(PSILog::OPENGL, "Updating color data");
-			mesh->bind_vao();
-			mesh->bind_buffer(GL_ARRAY_BUFFER, PSIGLMesh::BufferName::COLOR);
-			mesh->buffer_sub_data(GL_ARRAY_BUFFER, 0, _geometry_data->colors.size() * sizeof(glm::vec4), &_geometry_data->colors[0]);
+			//
+			// Through the rotating path, not buffer_sub_data(): this runs from
+			// inside draw(), and scripts that recolour every frame (psiengine)
+			// would otherwise be memcpying into Shared memory the GPU is still
+			// reading for the two frames in flight behind this one.
+			mesh->update_color_data(&_geometry_data->colors[0],
+			                        _geometry_data->colors.size() * sizeof(glm::vec4));
 		}
 
 		material->set_needs_update(false);
 	}
 
 	// Setup texture.
-	auto texture = material->get_texture();
+	const auto &texture = material->texture_ref();
 	if (texture != nullptr) {
 		// There is no glActiveTexture equivalent: PSIGLTexture::bind() sets the
 		// texture and its sampler on the encoder at slot 0 directly, matching
@@ -79,45 +87,49 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		texture->bind();
 	}
 
-	auto render_transform = asset.transform;
+	// Calculate mvp matrix for the shader.
+	//
+	// The non-interpolated path deliberately passes the object's own transform
+	// rather than a copy: the model matrix is cached on the transform, and a
+	// fresh copy every frame would throw that cache away every frame.
 	if (_interpolate_transform == true) {
 		// Interpolate new translation between current transform and previous transform.
+		PSIGLTransform render_transform = asset.transform;
 		render_transform.interpolate_from(asset.p_transform, ctx->transform_interpolation);
+		calc_model_view_projection(ctx, render_transform);
+	} else {
+		calc_model_view_projection(ctx, asset.transform);
 	}
 
-	// Calculate mvp matrix for the shader.
-	calc_model_view_projection(ctx, render_transform);
-
 	// Set uniforms specific for this render object.
-	shader->set_uniform("u_model_view_projection_matrix", get_model_view_projection_matrix());
+	shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
 
-	auto gl_mesh = get_gl_mesh();
+	const auto &gl_mesh = get_gl_mesh_ref();
 	if (gl_mesh != nullptr && gl_mesh->is_instanced()) {
 		// Instanced shaders build their own MVP, because the per-instance
 		// transform has to sit between this object's model matrix and the view.
 		// The pre-multiplied MVP above is no use to them.
-		shader->set_uniform("u_model_matrix", get_model_matrix());
-		shader->set_uniform("u_view_matrix", ctx->view.top());
-		shader->set_uniform("u_projection_matrix", ctx->projection.top());
+		shader->set_uniform(hot.model_matrix, get_model_matrix());
+		shader->set_uniform(hot.view_matrix, ctx->view.top());
+		shader->set_uniform(hot.projection_matrix, ctx->projection.top());
 
 		// Identity: the instanced vertex shader transforms the normal by the
 		// combined model matrix itself, so per-instance rotation affects
 		// lighting. That makes fragment_phong's `u_normal_matrix * f_normal` a
 		// no-op and lets the fragment shader be shared unchanged.
-		shader->set_uniform("u_normal_matrix", glm::mat3(1.0f));
+		shader->set_uniform(hot.normal_matrix, glm::mat3(1.0f));
 
 		// Push any pending instance edits before the draw reads the buffer.
 		gl_mesh->upload_instances();
 	} else {
-		shader->set_uniform("u_normal_matrix", get_normal_matrix());
+		shader->set_uniform(hot.normal_matrix, get_normal_matrix());
 	}
 
 	// Draw the mesh
 	draw_mesh();
 
 	// Render children of this object, if any.
-	auto children = get_children();
-	for (auto child : children) {
+	for (const auto &child : get_children_ref()) {
 		child->draw(ctx);
 	}
 
@@ -184,11 +196,38 @@ void PSIRenderObj::init_buffers(const GLMeshSharedPtr &mesh, const GeometryDataS
 	}
 }
 
+void PSIRenderObj::update_aabb_from_geometry() {
+	if (_geometry_data == nullptr || _geometry_data->positions.empty()) {
+		return;
+	}
+
+	// One pass at load time. Until now nothing ever wrote these, so every
+	// object claimed to be a unit cube -- see PSIAABB::is_valid().
+	glm::vec3 min = _geometry_data->positions[0];
+	glm::vec3 max = min;
+
+	for (const glm::vec3 &p : _geometry_data->positions) {
+		min = glm::min(min, p);
+		max = glm::max(max, p);
+	}
+
+	_render_asset.aabb.set_bounds(min, max);
+}
+
 GLMeshSharedPtr PSIRenderObj::create_gl_mesh(const GeometryDataSharedPtr &gpu_data) {
 	assert(gpu_data != nullptr);
 	assert(gpu_data->positions.size() > 0);
 	assert(get_material() != nullptr);
 	assert(get_shader() != nullptr);
+
+	// PSITextRenderer builds its geometry and hands it straight to this call
+	// without going through set_geometry_data(), so the bounds are taken here
+	// too rather than only there.
+	if (_geometry_data == nullptr) {
+		set_geometry_data(gpu_data);
+	} else {
+		update_aabb_from_geometry();
+	}
 
 	// Create a new mesh.
 	auto mesh = PSIGLMesh::create();

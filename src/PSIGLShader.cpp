@@ -59,6 +59,10 @@ PSIGLShader::~PSIGLShader() {
 		_pipeline->release();
 		_pipeline = nullptr;
 	}
+	if (_pipeline_opaque != nullptr) {
+		_pipeline_opaque->release();
+		_pipeline_opaque = nullptr;
+	}
 	if (_vertex_fn != nullptr) {
 		_vertex_fn->release();
 		_vertex_fn = nullptr;
@@ -284,8 +288,9 @@ GLuint PSIGLShader::compile() {
 	color->setPixelFormat(PSI_G::metal_ctx->color_format());
 
 	// The GL renderer enabled GL_BLEND with SRC_ALPHA / ONE_MINUS_SRC_ALPHA for
-	// the whole frame. In Metal blending is baked into the pipeline, so every
-	// pipeline carries the same equation.
+	// the whole frame. In Metal blending is baked into the pipeline, so this
+	// builds the blended variant first and the opaque one from the same
+	// descriptor below.
 	color->setBlendingEnabled(true);
 	color->setRgbBlendOperation(MTL::BlendOperationAdd);
 	color->setAlphaBlendOperation(MTL::BlendOperationAdd);
@@ -325,6 +330,7 @@ GLuint PSIGLShader::compile() {
 	// valid here, and add_uniforms() is called separately by the scripts.
 	_uniforms.clear();
 	_uniform_members.clear();
+	_fragment_has_uniforms = false;
 
 	if (reflection != nullptr) {
 		NS::Array *args = reflection->vertexBindings();
@@ -365,6 +371,13 @@ GLuint PSIGLShader::compile() {
 					continue;
 				}
 
+				// stage 1 is the fragment function. Recording that it asked for
+				// the block is what lets bind_uniforms() skip the second push
+				// for shaders that never declared it.
+				if (stage == 1) {
+					_fragment_has_uniforms = true;
+				}
+
 				// Both stages bind the same struct at the same index, so the
 				// second pass just re-resolves identical names.
 				reflect_struct(st, "", 0);
@@ -376,8 +389,33 @@ GLuint PSIGLShader::compile() {
 		}
 	}
 
+	// The same pipeline with blending switched off, for materials that do not
+	// need it. Everything else about the descriptor -- functions, vertex layout,
+	// pixel formats, sample count -- is identical, so this is one extra
+	// newRenderPipelineState per shader at load time and nothing at draw time.
+	//
+	// No reflection: the two share every binding, and the block was already
+	// resolved above.
+	color->setBlendingEnabled(false);
+	NS::Error *opaque_error = nullptr;
+	_pipeline_opaque = PSI_G::metal_ctx->device()->newRenderPipelineState(
+		pipeline_desc, &opaque_error);
+
+	if (_pipeline_opaque == nullptr) {
+		// Not fatal: use_program() falls back to the blended pipeline, which is
+		// what every object used before this existed.
+		const char *msg = "unknown error";
+		if (opaque_error != nullptr && opaque_error->localizedDescription() != nullptr) {
+			msg = opaque_error->localizedDescription()->utf8String();
+		}
+		psilog_err("Shader %s: opaque pipeline variant failed (%s); "
+		           "objects using it stay blended", get_info_str().c_str(), msg);
+	}
+
 	vertex_desc->release();
 	pipeline_desc->release();
+
+	resolve_hot_uniforms();
 
 	psilog(PSILog::OPENGL, "Shader %s compiled (%s / %s), %zu uniforms, block %zu bytes",
 	       get_info_str().c_str(), vertex_fn_name.c_str(),
@@ -425,6 +463,29 @@ void PSIGLShader::reflect_struct(MTL::StructType *type, const std::string &prefi
 	}
 }
 
+void PSIGLShader::resolve_hot_uniforms() {
+	// One hash lookup each, once per shader, replacing several per draw call.
+	// Names come from the single shared PSIUniforms struct in
+	// assets/shaders/psi_common.h; a shader that omits one keeps
+	// INVALID_UNIFORM here and writing to it is a no-op, same as before.
+	_hot.mvp_matrix        = get_uniform("u_model_view_projection_matrix");
+	_hot.model_matrix      = get_uniform("u_model_matrix");
+	_hot.view_matrix       = get_uniform("u_view_matrix");
+	_hot.projection_matrix = get_uniform("u_projection_matrix");
+	_hot.normal_matrix     = get_uniform("u_normal_matrix");
+	_hot.color             = get_uniform("u_color");
+	_hot.elapsed_time      = get_uniform("u_elapsed_time");
+
+	// Reflection reports nested struct members dotted, so these match the names
+	// setup_lights() used to pass.
+	_hot.ambient_color     = get_uniform("u_ambient.color");
+	_hot.ambient_intensity = get_uniform("u_ambient.intensity");
+	_hot.light_pos         = get_uniform("u_light.pos");
+	_hot.light_color       = get_uniform("u_light.color");
+	_hot.light_intensity   = get_uniform("u_light.intensity");
+	_hot.light_dir         = get_uniform("u_light.dir");
+}
+
 GLuint PSIGLShader::add_uniform(std::string name) {
 	return get_uniform(name);
 }
@@ -450,7 +511,7 @@ void PSIGLShader::add_transform_feedback_varyings(std::vector<std::string> varyi
 	           get_info_str().c_str(), names.c_str());
 }
 
-void PSIGLShader::use_program() {
+void PSIGLShader::use_program(bool blended) {
 	if (PSI_G::metal_ctx == nullptr) {
 		return;
 	}
@@ -476,7 +537,9 @@ void PSIGLShader::use_program() {
 		return;
 	}
 
-	encoder->setRenderPipelineState(_pipeline);
+	MTL::RenderPipelineState *pipeline =
+		(!blended && _pipeline_opaque != nullptr) ? _pipeline_opaque : _pipeline;
+	encoder->setRenderPipelineState(pipeline);
 
 	// Become the "bound program", so the draw call can flush our staged
 	// uniforms no matter which class issues it.
@@ -498,8 +561,13 @@ void PSIGLShader::bind_uniforms() {
 	// which is what reproduces OpenGL's single uniform namespace.
 	encoder->setVertexBytes(_uniform_data.data(), _uniform_data.size(),
 	                        PSIMetal::BUFFER_UNIFORMS_VERTEX);
-	encoder->setFragmentBytes(_uniform_data.data(), _uniform_data.size(),
-	                          PSIMetal::BUFFER_UNIFORMS_VERTEX);
+
+	// ...unless the fragment function never declared the block. Pushing it there
+	// anyway is a full copy of the block per draw that nothing reads.
+	if (_fragment_has_uniforms) {
+		encoder->setFragmentBytes(_uniform_data.data(), _uniform_data.size(),
+		                          PSIMetal::BUFFER_UNIFORMS_VERTEX);
+	}
 }
 
 void PSIGLShader::write_uniform(GLuint location, const void *data, size_t size) {

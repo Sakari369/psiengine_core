@@ -59,6 +59,10 @@ void PSIMetalContext::shutdown() {
 		_offscreen_msaa->release();
 		_offscreen_msaa = nullptr;
 	}
+	if (_capture_cmd != nullptr) {
+		_capture_cmd->release();
+		_capture_cmd = nullptr;
+	}
 	if (_capture_texture != nullptr) {
 		_capture_texture->release();
 		_capture_texture = nullptr;
@@ -209,6 +213,20 @@ void PSIMetalContext::set_msaa_samples(int samples) {
 	create_depth_texture(_drawable_size);
 }
 
+MTL::StorageMode PSIMetalContext::transient_storage_mode() const {
+	// Memoryless attachments live only in tile memory: no DRAM is allocated and
+	// nothing is written back. Legal only while every pass using them clears on
+	// load and DontCare/MultisampleResolve on store, which is what begin_frame()
+	// and begin_offscreen_frame() set up. Adding StoreActionStore or
+	// LoadActionLoad to depth or the MSAA colour target would fail validation.
+	//
+	// Tile memory is an Apple-GPU feature; anything else falls back to Private.
+	if (_device != nullptr && _device->supportsFamily(MTL::GPUFamilyApple1)) {
+		return MTL::StorageModeMemoryless;
+	}
+	return MTL::StorageModePrivate;
+}
+
 bool PSIMetalContext::create_depth_texture(glm::ivec2 size) {
 	if (_device == nullptr || size.x <= 0 || size.y <= 0) {
 		return false;
@@ -232,9 +250,11 @@ bool PSIMetalContext::create_depth_texture(glm::ivec2 size) {
 	desc->setWidth(static_cast<NS::UInteger>(size.x));
 	desc->setHeight(static_cast<NS::UInteger>(size.y));
 	desc->setUsage(MTL::TextureUsageRenderTarget);
-	// The depth buffer is never read back on the CPU and does not need to
-	// survive past the frame, so keep it in tile/private memory.
-	desc->setStorageMode(MTL::StorageModePrivate);
+	// The depth buffer never leaves the tile: it is cleared at the start of the
+	// pass and StoreActionDontCare at the end, so no system memory ever has to
+	// back it. Memoryless is what actually expresses that -- Private still
+	// allocates DRAM and still writes back.
+	desc->setStorageMode(transient_storage_mode());
 
 	_depth_texture = _device->newTexture(desc);
 	desc->release();
@@ -257,7 +277,9 @@ bool PSIMetalContext::create_depth_texture(glm::ivec2 size) {
 	color_desc->setWidth(static_cast<NS::UInteger>(size.x));
 	color_desc->setHeight(static_cast<NS::UInteger>(size.y));
 	color_desc->setUsage(MTL::TextureUsageRenderTarget);
-	color_desc->setStorageMode(MTL::StorageModePrivate);
+	// Resolved into the drawable inside the tile (StoreActionMultisampleResolve),
+	// so the individual samples are never read from memory either.
+	color_desc->setStorageMode(transient_storage_mode());
 
 	_msaa_texture = _device->newTexture(color_desc);
 	color_desc->release();
@@ -322,9 +344,11 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 
 	if (_frame_started) {
 		// Second pass in the same frame. Close the current one and start a fresh
-		// one -- see the note in the header.
+		// one -- see the note in the header. The frame's autorelease pool stays
+		// open; opening a second one here would leave the first undrained.
 		end_encoding();
 	} else {
+		_frame_pool = NS::AutoreleasePool::alloc()->init();
 		dispatch_semaphore_wait(_frame_sem, DISPATCH_TIME_FOREVER);
 		_cmd = _queue->commandBuffer();
 		_frame_started = true;
@@ -428,7 +452,7 @@ bool PSIMetalContext::ensure_offscreen_targets(glm::ivec2 size) {
 	desc->setWidth(static_cast<NS::UInteger>(size.x));
 	desc->setHeight(static_cast<NS::UInteger>(size.y));
 	desc->setUsage(MTL::TextureUsageRenderTarget);
-	desc->setStorageMode(MTL::StorageModePrivate);
+	desc->setStorageMode(transient_storage_mode());
 	_offscreen_depth = _device->newTexture(desc);
 	desc->release();
 
@@ -445,7 +469,7 @@ bool PSIMetalContext::ensure_offscreen_targets(glm::ivec2 size) {
 		cd->setWidth(static_cast<NS::UInteger>(size.x));
 		cd->setHeight(static_cast<NS::UInteger>(size.y));
 		cd->setUsage(MTL::TextureUsageRenderTarget);
-		cd->setStorageMode(MTL::StorageModePrivate);
+		cd->setStorageMode(transient_storage_mode());
 		_offscreen_msaa = _device->newTexture(cd);
 		cd->release();
 
@@ -477,6 +501,7 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_offscreen_frame(MTL::Texture *
 		// buffer, as the on-screen path does.
 		end_encoding();
 	} else {
+		_frame_pool = NS::AutoreleasePool::alloc()->init();
 		dispatch_semaphore_wait(_frame_sem, DISPATCH_TIME_FOREVER);
 		_cmd = _queue->commandBuffer();
 		_frame_started = true;
@@ -569,6 +594,11 @@ bool PSIMetalContext::read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *siz
 		return false;
 	}
 
+	// present() committed without waiting, so the blit may still be in flight.
+	if (_capture_cmd != nullptr) {
+		_capture_cmd->waitUntilCompleted();
+	}
+
 	const int w = _capture_size.x;
 	const int h = _capture_size.y;
 
@@ -607,9 +637,13 @@ void PSIMetalContext::present() {
 	//
 	// Core Animation recycles the drawable as soon as it is presented, so there
 	// is no equivalent of glReadBuffer(GL_FRONT) to read afterwards -- the copy
-	// has to be made now, while the texture is still ours. One full-screen blit
-	// per frame, which is cheap on unified memory.
-	if (_drawable != nullptr && ensure_capture_texture(_drawable_size)) {
+	// has to be made now, while the texture is still ours.
+	//
+	// Only when someone has actually asked for it. This is a full-screen read
+	// plus write of the drawable every frame, and the drawable is the
+	// supersampled size; unconditionally it was the single largest bandwidth
+	// consumer in the engine.
+	if (_capture_armed && _drawable != nullptr && ensure_capture_texture(_drawable_size)) {
 		MTL::BlitCommandEncoder *blit = _cmd->blitCommandEncoder();
 		if (blit != nullptr) {
 			blit->copyFromTexture(_drawable->texture(), 0, 0,
@@ -620,6 +654,13 @@ void PSIMetalContext::present() {
 			                      MTL::Origin(0, 0, 0));
 			blit->endEncoding();
 			_capture_valid = true;
+
+			// Hold this buffer past the pool drain so read_last_frame() has
+			// something to wait on -- commit() below does not block.
+			if (_capture_cmd != nullptr) {
+				_capture_cmd->release();
+			}
+			_capture_cmd = _cmd->retain();
 		}
 	}
 
@@ -628,9 +669,17 @@ void PSIMetalContext::present() {
 		_cmd->presentDrawable(_drawable);
 	}
 
-	// Release the frame slot once the GPU is actually done with this frame.
+	// Release the frame slot once the GPU is actually done with this frame, and
+	// record how long the GPU spent on it. The context outlives every frame --
+	// shutdown() drains all of them before releasing anything -- so capturing
+	// `this` here is safe even though the handler runs on a Metal thread.
 	dispatch_semaphore_t sem = _frame_sem;
-	_cmd->addCompletedHandler([sem](MTL::CommandBuffer *) {
+	_cmd->addCompletedHandler([sem, this](MTL::CommandBuffer *cmd) {
+		double seconds = cmd->GPUEndTime() - cmd->GPUStartTime();
+		if (seconds > 0.0) {
+			_gpu_time_ns.fetch_add((uint64_t)(seconds * 1e9), std::memory_order_relaxed);
+			_gpu_frames.fetch_add(1, std::memory_order_relaxed);
+		}
 		dispatch_semaphore_signal(sem);
 	});
 
@@ -639,4 +688,39 @@ void PSIMetalContext::present() {
 	_cmd = nullptr;
 	_drawable = nullptr;
 	_frame_started = false;
+
+	// Move to the next in-flight slot. Here rather than in begin_frame() so a
+	// frame that render()s twice keeps writing into one slot.
+	_frame_counter++;
+
+	// Everything autoreleased while encoding goes now.
+	if (_frame_pool != nullptr) {
+		_frame_pool->release();
+		_frame_pool = nullptr;
+	}
+}
+
+double PSIMetalContext::gpu_time_mean_ms() const {
+	uint32_t frames = _gpu_frames.load(std::memory_order_relaxed);
+	if (frames == 0) {
+		return 0.0;
+	}
+	uint64_t total_ns = _gpu_time_ns.load(std::memory_order_relaxed);
+	return (double)total_ns / (double)frames / 1e6;
+}
+
+void PSIMetalContext::arm_capture() {
+	if (_capture_armed) {
+		return;
+	}
+
+	_capture_armed = true;
+
+	// The drawable cannot be a blit source while the layer is framebuffer-only.
+	// This applies to drawables vended from now on, which is why the frame that
+	// arms capture is not itself readable.
+	PSIMetal::set_layer_framebuffer_only(_layer, false);
+
+	psilog(PSILog::EXPORT,
+	       "Frame capture armed; the next presented frame will be readable");
 }

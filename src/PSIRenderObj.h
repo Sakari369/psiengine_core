@@ -117,6 +117,13 @@ class PSIRenderObj {
 			return _render_asset.material->get_shader();
 		}
 
+		// Draw-path accessor; see PSIGLMaterial::shader_ref(). The object owns
+		// the material for the whole call, so the reference cannot dangle.
+		const ShaderSharedPtr &get_shader_ref() const {
+			assert(_render_asset.material != nullptr);
+			return _render_asset.material->shader_ref();
+		}
+
 		void set_draw_mode(GLuint draw_mode) {
 			assert(_render_asset.mesh != nullptr);
 			_render_asset.mesh->set_draw_mode(draw_mode);
@@ -182,8 +189,19 @@ class PSIRenderObj {
 		glm::mat4 get_projection_matrix() {
 			return _mvp.projection;
 		}
+		// Inverse transpose of the model matrix's rotation/scale part.
+		//
+		// Cached against the matrix it was derived from, for the same reason
+		// PSIGLTransform caches the model matrix: sixteen float compares instead
+		// of a 3x3 inverse and transpose, per object per frame, and most objects
+		// hold still.
 		glm::mat3 get_normal_matrix() {
-			return glm::inverseTranspose(glm::mat3(_mvp.model));
+			if (!_normal_matrix_valid || _normal_matrix_src != _mvp.model) {
+				_normal_matrix = glm::inverseTranspose(glm::mat3(_mvp.model));
+				_normal_matrix_src = _mvp.model;
+				_normal_matrix_valid = true;
+			}
+			return _normal_matrix;
 		}
 
 		void set_modules(GLint modules) {
@@ -192,6 +210,10 @@ class PSIRenderObj {
 
 		void set_geometry_data(const GeometryDataSharedPtr &geometry_data) {
 			_geometry_data = geometry_data;
+			// Bounds come from the geometry, and this is the one call every
+			// path that attaches geometry makes -- including the shared-mesh
+			// path in psi/obj.lua, which never calls create_gl_mesh().
+			update_aabb_from_geometry();
 		}
 		GeometryDataSharedPtr get_geometry_data() {
 			return _geometry_data;
@@ -205,7 +227,14 @@ class PSIRenderObj {
 		RenderObjSharedPtr get_child(GLuint index) {
 			return _children.at(index);
 		}
+		// By value: this is what Lua binds (LuaAPI.cpp).
 		std::vector<RenderObjSharedPtr> get_children() {
+			return _children;
+		}
+		// Draw-path accessor. The by-value form copies the vector and then the
+		// range-for copied every shared_ptr in it again, on every object of
+		// every frame -- for a list that is empty on almost all of them.
+		const std::vector<RenderObjSharedPtr> &get_children_ref() const {
 			return _children;
 		}
 		GLboolean has_children() {
@@ -219,12 +248,41 @@ class PSIRenderObj {
 			return _render_asset.aabb;
 		}
 
+		// Which of the shader's two pipelines this object needs; see
+		// PSIGLMaterial::set_blending().
+		bool wants_blending() const {
+			assert(_render_asset.material != nullptr);
+			return _render_asset.material->wants_blending();
+		}
+
+		// Fill the bounding box from this object's geometry. Load time only.
+		void update_aabb_from_geometry();
+
+		// May the renderer skip this object when its bounds fall outside the
+		// camera frustum?
+		//
+		// Off for anything whose CPU-side bounds are not where the GPU actually
+		// draws it -- a vertex shader that displaces geometry, for one. The
+		// renderer already excludes the structural cases by itself (see
+		// PSIGLRenderer::is_inside_frustum), so this is for what only the script
+		// knows.
+		void set_cullable(GLboolean cullable) {
+			_cullable = cullable;
+		}
+		GLboolean is_cullable() {
+			return _cullable;
+		}
+
 		void set_sort_index(GLfloat sort_index) {
 			_sort_index = sort_index;
 			_sort_index_set = true;
 		}
 		GLfloat get_sort_index() {
 			return (_sort_index_set == true) ? _sort_index : _render_asset.transform.get_translation().z;
+		}
+		// Did a script place this object manually? See PSIRenderScene::sort().
+		bool has_sort_index() const {
+			return _sort_index_set;
 		}
 
 		void set_gl_mesh(GLMeshSharedPtr &mesh) {
@@ -233,11 +291,21 @@ class PSIRenderObj {
 		GLMeshSharedPtr get_gl_mesh() {
 			return _render_asset.mesh;
 		}
+		const GLMeshSharedPtr &get_gl_mesh_ref() const {
+			return _render_asset.mesh;
+		}
 
 		void set_render_asset(render_asset &render_asset) {
 			_render_asset = render_asset;
 		}
-		render_asset get_render_asset() {
+		// By reference, not by value.
+		//
+		// render_asset is ~128 bytes holding two shared_ptrs, and the draw path
+		// asked for a copy of it per object per frame -- four atomic refcount
+		// operations plus the copy, to read two fields. Not const, because
+		// calc_model_view_projection() writes through the transform's matrix
+		// cache; see PSIGLTransform.
+		render_asset &get_render_asset() {
 			return _render_asset;
 		}
 
@@ -319,6 +387,11 @@ class PSIRenderObj {
 		// Model view projection.
 		struct transform_matrices _mvp;
 
+		// Normal matrix cache; see get_normal_matrix().
+		glm::mat3 _normal_matrix = glm::mat3(1.0f);
+		glm::mat4 _normal_matrix_src = glm::mat4(1.0f);
+		bool _normal_matrix_valid = false;
+
 		// The render asset for this render obj.
 		PSIRenderObj::render_asset _render_asset;
 		// Geometry data for this render obj.
@@ -335,6 +408,8 @@ class PSIRenderObj {
 		GLboolean _camera_translated = true;
 		// Is our object visible, should it be drawn ?
 		GLboolean _visible = true;
+		// May frustum culling skip this object ? See set_cullable().
+		GLboolean _cullable = true;
 		// are we interpolating movement with physics state ?
 		GLboolean _interpolate_transform = false;
 

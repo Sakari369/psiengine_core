@@ -158,6 +158,17 @@ class PSIGLMesh {
 		// Update buffer contents in place.
 		void buffer_sub_data(GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data);
 
+		// Replace the vertex colours for this frame.
+		//
+		// Use this rather than bind_buffer(COLOR) + buffer_sub_data() for a
+		// colour that changes while the mesh is being drawn. The static buffer
+		// is Shared storage written from inside draw(), which means a per-frame
+		// rewrite lands in memory the GPU is still reading for frames N-1 and
+		// N-2; this rotates through MAX_FRAMES_IN_FLIGHT copies instead.
+		//
+		// A mesh that never calls this keeps its single static colour buffer.
+		void update_color_data(const GLvoid *data, GLsizeiptr size);
+
 		// Allocate or replace a buffer's contents.
 		void buffer_data(GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage);
 
@@ -216,11 +227,30 @@ class PSIGLMesh {
 		// The index component type, as a GL enum.
 		GLenum _index_type = GL_UNSIGNED_INT;
 
-		// Per-instance data, CPU side, and its GPU copy.
+		// Buffers the CPU rewrites while the GPU may still be reading them are
+		// held once per in-flight frame; see PSIMetalContext::frame_slot().
+		static const int FRAME_SLOTS = PSIMetal::MAX_FRAMES_IN_FLIGHT;
+
+		// Per-instance data, CPU side, and its per-frame GPU copies.
 		std::vector<instance_data> _instances;
-		MTL::Buffer *_instance_buffer = nullptr;
-		// Instances changed since the last upload_instances().
-		bool _instances_dirty = false;
+		MTL::Buffer *_instance_buffers[FRAME_SLOTS] = {};
+		// Bumped on every instance edit. A slot is re-uploaded when its recorded
+		// version is behind this -- which is what makes a single set_instance()
+		// at setup reach all three slots rather than only the one that happened
+		// to be current.
+		uint32_t _instances_version = 1;
+		uint32_t _instance_slot_version[FRAME_SLOTS] = {};
+
+		// Rotating colour buffers, allocated on the first update_color_data().
+		// Null until then, and the static _buffers[COLOR] is used instead.
+		MTL::Buffer *_color_buffers[FRAME_SLOTS] = {};
+		std::vector<uint8_t> _color_data;
+		uint32_t _color_version = 1;
+		uint32_t _color_slot_version[FRAME_SLOTS] = {};
+		bool _color_rotating = false;
+
+		// This slot's colour buffer, uploaded from _color_data if it is stale.
+		MTL::Buffer *color_buffer_for_slot(int slot);
 
 		// How many copies the next draw should issue. Always at least 1.
 		GLuint draw_instance_count() const {
@@ -233,4 +263,6 @@ class PSIGLMesh {
 		void flush_current_uniforms();
 		// Resolve the target enum to the buffer name currently bound to it.
 		GLuint bound_name_for(GLenum target) const;
+		// This frame's slot in the rotating buffers.
+		static int current_slot();
 };

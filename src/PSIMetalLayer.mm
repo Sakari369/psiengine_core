@@ -41,11 +41,15 @@ void *attach_metal_layer(GLFWwindow *window, void *mtl_device, double contents_s
 	// what the drawable hands back; the render pipelines must match it.
 	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 
-	// NO, so the drawable can be used as a blit source. That is what makes
-	// screenshots possible at all (PSIGLRenderer::write_screen_to_file); a
-	// framebuffer-only drawable can be rendered to but never read back.
-	// It costs some lossless-compression opportunity on the drawable.
-	layer.framebufferOnly = NO;
+	// YES: the drawable is only ever a render target, so the GPU may keep it
+	// losslessly compressed for the whole frame.
+	//
+	// Screenshots need it off -- a framebuffer-only drawable can be rendered to
+	// but never used as a blit source -- so PSIMetalContext::arm_capture()
+	// flips it the first time write_screen_to_file() is called. Leaving it off
+	// unconditionally, as the port did, paid that bandwidth on every write to
+	// the drawable in every frame for a feature no script currently uses.
+	layer.framebufferOnly = YES;
 	layer.contentsScale = contents_scale;
 
 	// When the drawable is larger than the layer's bounds (supersampling), this
@@ -98,6 +102,14 @@ void set_layer_display_sync(void *metal_layer, bool enabled) {
 	}
 	CAMetalLayer *layer = (CAMetalLayer *)metal_layer;
 	layer.displaySyncEnabled = enabled ? YES : NO;
+}
+
+void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only) {
+	if (metal_layer == nullptr) {
+		return;
+	}
+	CAMetalLayer *layer = (CAMetalLayer *)metal_layer;
+	layer.framebufferOnly = framebuffer_only ? YES : NO;
 }
 
 } // namespace PSIMetal

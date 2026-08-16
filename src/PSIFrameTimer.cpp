@@ -1,5 +1,26 @@
 #include "PSIFrameTimer.h"
 
+#include <stdlib.h>
+
+namespace {
+
+// PSI_FIXED_FRAMETIME=<ms> forces end_frame() to behave as end_frame_fixed().
+//
+// Verification only. Most scripts already drive a fixed timestep, but the ones
+// that call end_frame() advance their animation by real elapsed time, so the
+// content at frame N differs between two runs and pixel-diffing a build against
+// another proves nothing. Setting this makes every script deterministic per
+// frame index. Unset (the default) is 0 and changes nothing.
+float fixed_frametime_override() {
+	static const float ms = []() {
+		const char *env = getenv("PSI_FIXED_FRAMETIME");
+		return (env != nullptr) ? (float)atof(env) : 0.0f;
+	}();
+	return ms;
+}
+
+} // namespace
+
 void PSIFrameTimer::begin_frame() {
 	// Store start of frame time.
 	clock_gettime(CLOCK_MONOTONIC, &_frame_start_ts);
@@ -23,6 +44,11 @@ GLfloat PSIFrameTimer::end_frame_fixed(GLfloat frametime) {
 // End frame and calculate actual frametime from beginning of frame to end of frame.
 // Use this for cases where movement and animation and so on needs to be time dependent exactly.
 GLfloat PSIFrameTimer::end_frame() {
+	const GLfloat forced = fixed_frametime_override();
+	if (forced > 0.0f) {
+		return end_frame_fixed(forced);
+	}
+
 	// Get time now.
 	struct timespec now_ts;
 	clock_gettime(CLOCK_MONOTONIC, &now_ts);

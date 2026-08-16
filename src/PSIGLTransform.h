@@ -19,6 +19,26 @@ class PSIGLTransform {
 		// Rotation vector.
 		glm::vec3 _rotation;
 
+		// Model matrix cache, and the values it was built from.
+		//
+		// get_model() runs once per object per frame and costs three sin/cos
+		// pairs and four 4x4 composes. Most objects in most scenes do not move
+		// between frames, so it is worth not rebuilding it -- but a dirty flag
+		// on the setters cannot work here: get_translation()/get_scaling()/
+		// get_rotation() hand out non-const references, Lua mutates the vectors
+		// through them in place (psi/grids.lua, game/player.lua, gltf_models.lua
+		// and others), and psi.ffi writes through a raw pointer. No mutator hook
+		// sees any of that.
+		//
+		// Comparing the inputs does, whatever route they were written by: nine
+		// float compares against three matrix builds. The cost when something
+		// did move is those nine compares.
+		mutable glm::mat4 _model_cache = glm::mat4(1.0f);
+		mutable glm::vec3 _cached_translation = glm::vec3(0.0f);
+		mutable glm::vec3 _cached_scaling = glm::vec3(0.0f);
+		mutable glm::vec3 _cached_rotation = glm::vec3(0.0f);
+		mutable bool _model_cached = false;
+
 	public:
 		PSIGLTransform(const glm::vec3 &translation = glm::vec3(0.0f, 0.0f, 0.0f), 
 			       const glm::vec3 &scaling     = glm::vec3(1.0f, 1.0f, 1.0f), 

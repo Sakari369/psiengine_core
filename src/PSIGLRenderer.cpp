@@ -74,6 +74,21 @@ bool PSIGLRenderer::write_screen_to_file(std::string path_basename, int format) 
 	std::string path;
 	std::string file_ext = "";
 
+	// Copying the drawable aside is off until something asks for it -- it is a
+	// full-screen blit every frame and it forces the layer out of
+	// framebuffer-only mode, so it is not free enough to leave running for a
+	// feature no script uses at runtime.
+	//
+	// Arming applies to drawables vended from now on, so the frame this is first
+	// called on cannot be read; report the miss and succeed from the next call.
+	// Every caller in the tree sits in the frame loop, so a sequence export just
+	// starts one frame later. Scripts that want frame 0 can arm it up front with
+	// psi.renderer:set_frame_capture(true).
+	if (_metal_ctx != nullptr && !_metal_ctx->is_capture_armed()) {
+		_metal_ctx->arm_capture();
+		return false;
+	}
+
 	if (format == ImageFormat::PNG) {
 		file_ext = ".png";
 	} else if (format == ImageFormat::QOI) {
@@ -91,8 +106,9 @@ bool PSIGLRenderer::write_screen_to_file(std::string path_basename, int format) 
 }
 
 void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx) {
-	GLint light_index = 0;
-	for (auto light : ctx->lights) {
+	const PSIGLShader::hot_uniforms &hot = shader->hot();
+
+	for (const auto &light : ctx->lights) {
 		PSILight::LightType type = light->get_type();
 		// We don't need the opacity for the light color.
 		glm::vec3 light_color = glm::vec3(light->get_color());
@@ -100,15 +116,15 @@ void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderCont
 		switch (type) {
 			case PSILight::LightType::AMBIENT:
 				// Usually we only have one ambient light, so just override.
-				shader->set_uniform("u_ambient.color", light_color);
-				shader->set_uniform("u_ambient.intensity", light->get_intensity());
+				shader->set_uniform(hot.ambient_color, light_color);
+				shader->set_uniform(hot.ambient_intensity, light->get_intensity());
 				break;
 
 			case PSILight::LightType::DIRECTIONAL: {
-				shader->set_uniform("u_light.pos", light->get_pos());
-				shader->set_uniform("u_light.color", light_color);
-				shader->set_uniform("u_light.intensity", light->get_intensity());
-				shader->set_uniform("u_light.dir", light->get_dir());
+				shader->set_uniform(hot.light_pos, light->get_pos());
+				shader->set_uniform(hot.light_color, light_color);
+				shader->set_uniform(hot.light_intensity, light->get_intensity());
+				shader->set_uniform(hot.light_dir, light->get_dir());
 				break;
 			}
 
@@ -116,9 +132,95 @@ void PSIGLRenderer::setup_lights(const ShaderSharedPtr &shader, const RenderCont
 				break;
 			}
 		}
-
-		light_index++;
 	}
+}
+
+void PSIGLRenderer::extract_frustum_planes(const glm::mat4 &vp) {
+	// Gribb-Hartmann: each clip-space bound gives a plane as a combination of
+	// the rows of the view-projection matrix. glm is column-major, so row i is
+	// (vp[0][i], vp[1][i], vp[2][i], vp[3][i]).
+	const glm::vec4 row0(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
+	const glm::vec4 row1(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
+	const glm::vec4 row2(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
+	const glm::vec4 row3(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+
+	_frustum_planes[0] = row3 + row0;   // left:   x > -w
+	_frustum_planes[1] = row3 - row0;   // right:  x <  w
+	_frustum_planes[2] = row3 + row1;   // bottom: y > -w
+	_frustum_planes[3] = row3 - row1;   // top:    y <  w
+	// Near is row2 alone rather than row3 + row2 because PSIOpenGL.h defines
+	// GLM_FORCE_DEPTH_ZERO_TO_ONE -- clip space z runs 0..w here, as Metal
+	// wants, not -w..w.
+	_frustum_planes[4] = row2;          // near:   z > 0
+	_frustum_planes[5] = row3 - row2;   // far:    z <  w
+
+	// Normalise, so the plane distance below is a real distance and can be
+	// compared against the box's projected radius.
+	for (int i = 0; i < 6; i++) {
+		float len = glm::length(glm::vec3(_frustum_planes[i]));
+		if (len > 0.0f) {
+			_frustum_planes[i] /= len;
+		}
+	}
+}
+
+bool PSIGLRenderer::is_inside_frustum(PSIRenderObj *obj, const RenderContextSharedPtr &ctx) const {
+	// Everything below is a case where the CPU-side box is not where the GPU
+	// draws the object, so it must never be culled. Erring towards drawing is
+	// always safe; erring the other way makes objects vanish.
+	if (!obj->is_cullable()) {
+		return true;
+	}
+	PSIAABB &aabb = obj->get_aabb();
+	if (!aabb.is_valid()) {
+		// No real geometry bounds; see PSIAABB::is_valid().
+		return true;
+	}
+	if (!obj->is_translated_by_camera() || !obj->is_depth_tested()) {
+		// Skybox and screen-space elements: drawn through a different view
+		// matrix than the frustum was built from.
+		return true;
+	}
+	if (obj->has_children()) {
+		// Children carry their own transforms, which this box does not cover.
+		return true;
+	}
+	const GLMeshSharedPtr &mesh = obj->get_gl_mesh_ref();
+	if (mesh == nullptr || mesh->is_instanced()) {
+		// The bounds describe the base mesh, not where the instances landed.
+		return true;
+	}
+
+	// Same composition order as calc_model_view_projection().
+	const glm::mat4 model = obj->get_transform().get_model() * ctx->model.top();
+
+	// Transform the box by centre and extent rather than by its eight corners:
+	// the centre goes through the matrix, and the extent through the matrix's
+	// absolute value, which gives the tightest axis-aligned box containing the
+	// rotated one.
+	const glm::vec3 center = glm::vec3(model * glm::vec4(aabb.get_center(), 1.0f));
+	const glm::vec3 local_extent = aabb.get_extent();
+	const glm::mat3 rs = glm::mat3(model);
+	const glm::vec3 extent(
+		glm::abs(rs[0][0]) * local_extent.x + glm::abs(rs[1][0]) * local_extent.y + glm::abs(rs[2][0]) * local_extent.z,
+		glm::abs(rs[0][1]) * local_extent.x + glm::abs(rs[1][1]) * local_extent.y + glm::abs(rs[2][1]) * local_extent.z,
+		glm::abs(rs[0][2]) * local_extent.x + glm::abs(rs[1][2]) * local_extent.y + glm::abs(rs[2][2]) * local_extent.z);
+
+	for (int i = 0; i < 6; i++) {
+		const glm::vec4 &plane = _frustum_planes[i];
+		const glm::vec3 normal(plane);
+
+		// Distance from the centre to the plane, and how far the box reaches
+		// towards it. Outside only if the whole box is on the negative side.
+		const float distance = glm::dot(normal, center) + plane.w;
+		const float radius = glm::dot(glm::abs(normal), extent);
+
+		if (distance + radius < 0.0f) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 GLint PSIGLRenderer::init_offscreen_texture(glm::ivec2 size) {
@@ -170,30 +272,55 @@ void PSIGLRenderer::draw_render_objs(const RenderSceneSharedPtr &scene,
                                      const RenderContextSharedPtr &ctx,
                                      const CameraSharedPtr &camera) {
 
-	ShaderSharedPtr previous_shader = nullptr;
+	// The scene's lights do not change between objects, so they are published to
+	// the context once here rather than copied in per shader group.
+	ctx->lights = scene->get_lights_ref();
+
+	// Compared by address: the shader is kept alive by the object's material for
+	// the whole loop, so there is nothing to own here.
+	const PSIGLShader *previous_shader = nullptr;
+	// Blending is part of the pipeline, so the run of objects that can share one
+	// setRenderPipelineState is now keyed on the shader AND the blend choice.
+	bool previous_blended = true;
+	bool have_previous = false;
+
 	for (const auto &obj : scene->m_render_objs) {
-		ShaderSharedPtr shader = obj->get_shader();
+		const ShaderSharedPtr &shader = obj->get_shader_ref();
 		assert(shader != nullptr);
 
-		// Don't change shader, if shader has not changed.
-		if (shader != previous_shader) {
-			shader->use_program();
+		const bool blended = obj->wants_blending();
 
+		// Don't change pipeline, if neither shader nor blend mode has changed.
+		if (!have_previous || shader.get() != previous_shader || blended != previous_blended) {
+			shader->use_program(blended);
+			previous_blended = blended;
+		}
+
+		// The lights and the elapsed time are staged into the shader's uniform
+		// block, not onto the encoder, so they only need rewriting when the
+		// shader itself changes -- not when the same shader flips blend mode.
+		if (shader.get() != previous_shader) {
 			// Setup scene lightning.
-			ctx->lights = scene->get_lights();
 			setup_lights(shader, ctx);
 
 			// Set once per frame shader uniforms.
-			shader->set_uniform("u_elapsed_time", ctx->elapsed_time);
+			shader->set_uniform(shader->hot().elapsed_time, ctx->elapsed_time);
 
-			previous_shader = shader;
+			previous_shader = shader.get();
 		}
-		
+		have_previous = true;
+
 		// We run logic here also, so we don't have to loop the objects twice per frame.
 		obj->logic(ctx);
-		if (obj->is_visible()) {
-			obj->draw(ctx);
+		if (!obj->is_visible()) {
+			continue;
 		}
+		// Cheaper than the draw it replaces, and it reuses the model matrix
+		// the object has cached anyway.
+		if (_frustum_culling && !is_inside_frustum(obj.get(), ctx)) {
+			continue;
+		}
+		obj->draw(ctx);
 	}
 }
 
@@ -264,10 +391,16 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 			// This can be disabled per object with obj->set_is_camera_translated().
 			ctx->view.top() = ctx->view.top() * camera->get_looking_at_matrix();
 
+			// The frustum only depends on the camera, so it is built once per
+			// pass rather than per object.
+			if (_frustum_culling == true) {
+				extract_frustum_planes(ctx->projection.top() * ctx->view.top());
+			}
+
 			if (scene->m_render_objs.empty() != true) {
 				// Sort our scene objects.
 				if (_sorting == true) {
-					scene->sort();
+					scene->sort(camera->get_pos());
 				}
 				// Draw render objects in the scene.
 				draw_render_objs(scene, ctx, camera);

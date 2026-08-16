@@ -57,6 +57,29 @@ class PSIGLRenderer {
 		// Setup shader uniforms for lights.
 		void setup_lights(const ShaderSharedPtr &shader, const RenderContextSharedPtr &ctx);
 
+		// Discard objects whose bounds fall entirely outside the camera frustum.
+		//
+		// Off by default and deliberately so. Scripts already control visibility
+		// themselves through set_visible(), the bounds are a CPU-side
+		// approximation, and it only pays on scenes with many separate objects --
+		// prism_grid draws 9600 prisms in one instanced call, where culling can
+		// do nothing at all. Turn it on for scenes like starfield that scatter
+		// hundreds of individually-drawn objects well past the view.
+		//
+		// The renderer never culls objects whose bounds do not describe where
+		// they are drawn: camera-locked ones (the skybox uses a different view
+		// matrix), instanced meshes (the bounds cover the base mesh, not the
+		// instance spread), objects with depth testing off, objects with
+		// children, and anything without real geometry bounds. A vertex shader
+		// that displaces geometry is the case only the script can know about --
+		// see PSIRenderObj::set_cullable().
+		void set_frustum_culling(GLboolean enabled) {
+			_frustum_culling = enabled;
+		}
+		GLboolean get_frustum_culling() {
+			return _frustum_culling;
+		}
+
 		// Initialize texture where we should render, if rendering scene to texture.
 		GLint init_offscreen_texture(glm::ivec2 size);
 
@@ -120,6 +143,17 @@ class PSIGLRenderer {
 		// Write current OpenGL buffer to PNG file.
 		bool write_screen_to_file(std::string path, int format);
 
+		// Start copying every presented frame aside so it can be written out.
+		//
+		// write_screen_to_file() arms this itself, but only from the frame after
+		// the first call -- see there. A script exporting from frame 0 calls this
+		// during setup instead. Additive; nothing needs it.
+		void set_frame_capture(GLboolean enabled) {
+			if (enabled && _metal_ctx != nullptr) {
+				_metal_ctx->arm_capture();
+			}
+		}
+
 	private:
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
 		RenderContextSharedPtr _ctx;
@@ -150,6 +184,15 @@ class PSIGLRenderer {
 		bool _wireframe = false;
 		// Depth sort render objects ?
 		bool _sorting = true;
+		// Cull objects outside the camera frustum ? See set_frustum_culling().
+		bool _frustum_culling = false;
+
+		// The six frustum planes of the current pass, as (a, b, c, d) with the
+		// inside on the positive side. Extracted once per render() from
+		// projection * view.
+		glm::vec4 _frustum_planes[6];
+		void extract_frustum_planes(const glm::mat4 &view_projection);
+		bool is_inside_frustum(PSIRenderObj *obj, const RenderContextSharedPtr &ctx) const;
 		// Current MSAA level.
 		GLfloat _msaa_samples = PSIVideo::DEF_MSAA_SAMPLES;
 		// Viewport size.

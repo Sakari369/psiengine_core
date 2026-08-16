@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <dispatch/dispatch.h>
 
 #include "PSIGlobals.h"
@@ -74,6 +75,33 @@ class PSIMetalContext {
 		// read after the fact. Returns false if no frame has been presented yet.
 		bool read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *size);
 
+		// Start copying every presented drawable aside for read_last_frame().
+		//
+		// The blit is a full-screen read + write of the drawable -- ~66 MB a frame
+		// at 3840x2160 -- and turning it on also forces framebufferOnly off, which
+		// costs lossless compression on every write to the drawable all frame. The
+		// port did both unconditionally; nothing in the tree reads the result
+		// unless a script asks for a screenshot, so it is armed on demand instead.
+		//
+		// Once armed it stays armed, so exporting a frame sequence keeps working.
+		// The frame it is armed on is already encoded, so the first capture is
+		// only available from the following frame -- which is why
+		// write_screen_to_file() reports a miss the first time and succeeds after.
+		void arm_capture();
+		bool is_capture_armed() const { return _capture_armed; }
+
+		// Mean GPU time per frame in ms, as Metal itself reports it, and the
+		// number of frames that went into it.
+		//
+		// Wall clock between presents does not measure the renderer: with vsync
+		// off, nextDrawable() still paces the CPU to the three drawables Core
+		// Animation vends, so every workload from 8 objects to 9600 instances
+		// reports roughly the same frame time. GPUStartTime/GPUEndTime are the
+		// GPU's own timestamps for the committed buffer and are unaffected by
+		// both vsync and that pacing.
+		double gpu_time_mean_ms() const;
+		uint32_t gpu_time_frames() const { return _gpu_frames.load(); }
+
 		// Reallocates the drawable and depth buffer. Called on framebuffer resize.
 		void resize(glm::ivec2 drawable_size);
 
@@ -109,6 +137,18 @@ class PSIMetalContext {
 
 		MTL::Device *device() const { return _device; }
 		MTL::CommandQueue *queue() const { return _queue; }
+
+		// Which of the MAX_FRAMES_IN_FLIGHT slots this frame owns.
+		//
+		// Anything the CPU rewrites while the GPU may still be reading it has to
+		// rotate through these, or frame N's memcpy lands in a buffer frames N-1
+		// and N-2 are still being drawn from. See PSIGLMesh's instance and colour
+		// buffers.
+		//
+		// Advanced once per frame, in present(), so both render() calls of a
+		// double-rendered frame share a slot.
+		uint32_t frame_slot() const { return _frame_counter % PSIMetal::MAX_FRAMES_IN_FLIGHT; }
+		uint64_t frame_counter() const { return _frame_counter; }
 
 		// The precompiled shader library (psishaders.metallib, built from
 		// assets/shaders/*.metal and placed next to the binary). Loaded on first
@@ -188,10 +228,28 @@ class PSIMetalContext {
 		bool ensure_offscreen_targets(glm::ivec2 size);
 
 		// CPU-visible copy of the last presented frame, for screenshots.
+		// Off until arm_capture(); see there for why.
 		MTL::Texture *_capture_texture = nullptr;
 		glm::ivec2 _capture_size = glm::ivec2(0, 0);
 		bool _capture_valid = false;
+		bool _capture_armed = false;
 		bool ensure_capture_texture(glm::ivec2 size);
+
+		// The command buffer that encoded the blit into _capture_texture, retained
+		// so read_last_frame() can wait for it. commit() does not block, so
+		// reading the texture straight after present() would otherwise race the
+		// GPU and hand back a torn frame.
+		MTL::CommandBuffer *_capture_cmd = nullptr;
+
+		// Drains the autoreleased objects this frame's encoding produced --
+		// nextDrawable(), commandBuffer() and renderCommandEncoder() are all
+		// autoreleased, and the Lua scripts drive the frame loop themselves
+		// without ever returning to an AppKit run loop.
+		//
+		// Opened by whichever of begin_frame()/begin_offscreen_frame() starts the
+		// frame, and drained at the end of present(). A second render() in the
+		// same frame must NOT open another one.
+		NS::AutoreleasePool *_frame_pool = nullptr;
 
 		// Precompiled shader library, loaded lazily.
 		MTL::Library *_shader_library = nullptr;
@@ -212,11 +270,22 @@ class PSIMetalContext {
 		MTL::RenderCommandEncoder *_encoder = nullptr;
 		bool _frame_started = false;
 
+		// Frames presented so far; see frame_slot().
+		uint64_t _frame_counter = 0;
+
 		// Throttles the CPU to MAX_FRAMES_IN_FLIGHT frames ahead of the GPU.
 		dispatch_semaphore_t _frame_sem = nullptr;
+
+		// GPU time accumulator; see gpu_time_mean_ms(). Written from the command
+		// buffer's completion handler, which runs on a Metal-owned thread.
+		std::atomic<uint64_t> _gpu_time_ns{0};
+		std::atomic<uint32_t> _gpu_frames{0};
 
 		glm::ivec2 _drawable_size = glm::ivec2(0, 0);
 
 		bool create_depth_texture(glm::ivec2 size);
 		void end_encoding();
+
+		// Storage mode for render targets that never outlive their pass.
+		MTL::StorageMode transient_storage_mode() const;
 };
