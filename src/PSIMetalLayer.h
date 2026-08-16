@@ -38,4 +38,44 @@ void set_layer_display_sync(void *metal_layer, bool enabled);
 // flipped once, on demand, when a screenshot is first requested.
 void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only);
 
+// Switches the layer between ordinary 8-bit output and extended dynamic range.
+//
+// EDR means three things at once, and all three have to move together:
+//
+//   * the drawable becomes RGBA16Float, so a value can exceed 1.0 at all;
+//   * wantsExtendedDynamicRangeContent tells the compositor to honour those
+//     values instead of clipping them at SDR white;
+//   * the colour space becomes extendedLinearDisplayP3, where 1.0 IS SDR white
+//     and the numbers above it are real luminance headroom.
+//
+// That last one also fixes, for this path only, the "sampled once at attach"
+// problem the ordinary path has: extendedLinearDisplayP3 is an absolute space,
+// so the compositor converts it correctly for whichever display the window is
+// on. Dragging between screens needs no re-tagging.
+//
+// Returns true if the layer is now in the requested state.
+bool set_layer_edr(void *metal_layer, bool enabled);
+
+// How much brighter than SDR white this window's display can currently go.
+//
+// 1.0 on an SDR display, and on an XDR panel anything from about 2 to 16
+// depending on the reference preset and the current SDR brightness. macOS moves
+// it at runtime -- brightness changes, thermal pressure -- so this is a poll,
+// not a constant, and reading it every frame is the intended usage.
+//
+// Reads the screen the window is currently on, so it also tracks a drag from
+// one display to another.
+double layer_edr_headroom(GLFWwindow *window);
+
+// Writes one line per attached display: its name, whether it can do EDR, and
+// its headroom right now. Called once when EDR output is turned on, because the
+// first question on seeing a headroom of 1.0 is always "is that this screen, or
+// is it broken?" -- and the answer is usually that the window opened on the
+// other display.
+//
+// The callback keeps this file free of PSILog, which is C++.
+void log_edr_displays(void (*log_line)(const char *name, bool capable,
+                                       double headroom, bool is_current),
+                      GLFWwindow *window);
+
 } // namespace PSIMetal

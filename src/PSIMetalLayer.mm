@@ -112,4 +112,94 @@ void set_layer_framebuffer_only(void *metal_layer, bool framebuffer_only) {
 	layer.framebufferOnly = framebuffer_only ? YES : NO;
 }
 
+bool set_layer_edr(void *metal_layer, bool enabled) {
+	if (metal_layer == nullptr) {
+		return false;
+	}
+
+	CAMetalLayer *layer = (CAMetalLayer *)metal_layer;
+
+	if (enabled) {
+		layer.pixelFormat = MTLPixelFormatRGBA16Float;
+		layer.wantsExtendedDynamicRangeContent = YES;
+
+		// Extended-linear, not the display's own space.
+		//
+		// The SDR path tags the layer with the display profile and writes linear
+		// values into it, so the compositor passes them through unconverted --
+		// which reproduces what the OpenGL build did, and is why every shader in
+		// the tree omits the transfer function. Here the tag says what the
+		// values actually are, so the compositor converts properly and the
+		// midtones come out brighter than the SDR path shows them. That is the
+		// correct picture, not a bug, and it is confined to this path because
+		// fixing it everywhere means touching every shader.
+		CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
+		if (cs == NULL) {
+			return false;
+		}
+		layer.colorspace = cs;
+		CGColorSpaceRelease(cs);
+
+		return true;
+	}
+
+	layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+	layer.wantsExtendedDynamicRangeContent = NO;
+
+	// Back to the display profile; see attach_metal_layer.
+	NSScreen *screen = [NSScreen mainScreen];
+	if (screen != nil && screen.colorSpace.CGColorSpace != NULL) {
+		layer.colorspace = screen.colorSpace.CGColorSpace;
+	}
+
+	return true;
+}
+
+double layer_edr_headroom(GLFWwindow *window) {
+	if (window == nullptr) {
+		return 1.0;
+	}
+
+	NSWindow *ns_window = glfwGetCocoaWindow(window);
+	if (ns_window == nil) {
+		return 1.0;
+	}
+
+	NSScreen *screen = ns_window.screen ?: [NSScreen mainScreen];
+	if (screen == nil) {
+		return 1.0;
+	}
+
+	double headroom = screen.maximumExtendedDynamicRangeColorComponentValue;
+
+	// An SDR display reports 1.0, and some report 0 before the first frame.
+	// Either way there is no headroom, and callers divide by this.
+	return (headroom > 1.0) ? headroom : 1.0;
+}
+
+void log_edr_displays(void (*log_line)(const char *name, bool capable,
+                                       double headroom, bool is_current),
+                      GLFWwindow *window) {
+	if (log_line == nullptr) {
+		return;
+	}
+
+	NSScreen *current = nil;
+	if (window != nullptr) {
+		NSWindow *ns_window = glfwGetCocoaWindow(window);
+		current = ns_window.screen;
+	}
+
+	for (NSScreen *screen in [NSScreen screens]) {
+		// The potential headroom, as opposed to what is available right now.
+		// A display can be EDR-capable and still report 1.0 currently, because
+		// SDR brightness is turned up far enough to leave nothing spare.
+		double potential = screen.maximumPotentialExtendedDynamicRangeColorComponentValue;
+		double now = screen.maximumExtendedDynamicRangeColorComponentValue;
+
+		log_line([screen.localizedName UTF8String], potential > 1.0, now,
+		         screen == current);
+	}
+}
+
 } // namespace PSIMetal

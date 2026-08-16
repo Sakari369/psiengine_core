@@ -25,6 +25,9 @@ bool PSIMetalContext::init(GLFWwindow *window, glm::ivec2 drawable_size, double 
 		return false;
 	}
 
+	// Held for edr_headroom(), which resolves the window's current screen.
+	_window = window;
+
 	_frame_sem = dispatch_semaphore_create(PSIMetal::MAX_FRAMES_IN_FLIGHT);
 
 	if (!create_depth_states()) {
@@ -824,6 +827,69 @@ bool PSIMetalContext::ensure_capture_texture(glm::ivec2 size) {
 	return true;
 }
 
+// Flip the drawable between 8-bit and float output.
+//
+// Everything downstream follows from _color_format: the MSAA colour target is
+// allocated with it, the drawable pass signature reports it, and PSIGLShader
+// builds a pipeline variant per signature -- so no pipeline, pass or shader
+// needs to know this happened.
+//
+// The MSAA and capture textures do have to go: both were allocated in the old
+// format and would mismatch the attachment. They are rebuilt lazily.
+bool PSIMetalContext::enable_edr_output(bool enabled) {
+	if (_layer == nullptr) {
+		return false;
+	}
+	if (enabled == _edr_output) {
+		return _edr_output;
+	}
+
+	if (!PSIMetal::set_layer_edr(_layer, enabled)) {
+		psilog_err("Display does not support extended dynamic range output");
+		return _edr_output;
+	}
+
+	_edr_output = enabled;
+	_color_format = enabled ? MTL::PixelFormatRGBA16Float : MTL::PixelFormatBGRA8Unorm;
+
+	// Rebuild the drawable's companion targets in the new format, through the
+	// function that owns them. Releasing _msaa_texture by hand instead left
+	// nothing to recreate it -- it is only built here and on resize -- so the
+	// drawable pass silently lost its multisampled attachment while the
+	// pipelines were still compiled for one, and validation caught the sample
+	// count mismatch on the first draw.
+	create_depth_texture(_drawable_size);
+
+	if (_capture_texture != nullptr) {
+		_capture_texture->release();
+		_capture_texture = nullptr;
+		_capture_valid = false;
+	}
+
+	// The signature held between passes is the drawable's, and it just changed.
+	_pass_signature.color_format = _color_format;
+
+	psilog(PSILog::VIDEO, "EDR output %s, drawable is %s",
+	       enabled ? "on" : "off",
+	       enabled ? "RGBA16Float" : "BGRA8Unorm");
+
+	if (enabled) {
+		PSIMetal::log_edr_displays(
+			[](const char *name, bool capable, double headroom, bool is_current) {
+				psilog(PSILog::VIDEO, "  display '%s'%s: EDR %s, headroom now %.2fx",
+				       name, is_current ? " (window is here)" : "",
+				       capable ? "capable" : "not available", headroom);
+			},
+			_window);
+	}
+
+	return _edr_output;
+}
+
+double PSIMetalContext::edr_headroom() const {
+	return PSIMetal::layer_edr_headroom(_window);
+}
+
 bool PSIMetalContext::read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *size) {
 	if (rgb == nullptr || size == nullptr) {
 		return false;
@@ -841,16 +907,35 @@ bool PSIMetalContext::read_last_frame(std::vector<uint8_t> *rgb, glm::ivec2 *siz
 	const int w = _capture_size.x;
 	const int h = _capture_size.y;
 
-	std::vector<uint8_t> bgra((size_t)w * h * 4);
 	MTL::Region region = MTL::Region::Make2D(0, 0, (NS::UInteger)w, (NS::UInteger)h);
-	_capture_texture->getBytes(bgra.data(), (NS::UInteger)w * 4, region, 0);
+	const size_t pixels = (size_t)w * h;
+	rgb->resize(pixels * 3);
 
-	// The drawable is BGRA; the image writers want tightly packed RGB.
-	rgb->resize((size_t)w * h * 3);
-	for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
-		(*rgb)[i * 3 + 0] = bgra[i * 4 + 2];
-		(*rgb)[i * 3 + 1] = bgra[i * 4 + 1];
-		(*rgb)[i * 3 + 2] = bgra[i * 4 + 0];
+	if (_edr_output) {
+		// RGBA16Float, and the values run past 1.0 -- that is the point of the
+		// mode. A PNG cannot hold them, so the screenshot is the SDR view of an
+		// HDR frame: clamped at SDR white, which is what a camera pointed at the
+		// screen would also give you for anything in the headroom.
+		std::vector<_Float16> half(pixels * 4);
+		_capture_texture->getBytes(half.data(), (NS::UInteger)w * 8, region, 0);
+
+		for (size_t i = 0; i < pixels; i++) {
+			for (int c = 0; c < 3; c++) {
+				float v = (float)half[i * 4 + c];
+				v = (v < 0.0f) ? 0.0f : (v > 1.0f ? 1.0f : v);
+				(*rgb)[i * 3 + c] = (uint8_t)(v * 255.0f + 0.5f);
+			}
+		}
+	} else {
+		std::vector<uint8_t> bgra(pixels * 4);
+		_capture_texture->getBytes(bgra.data(), (NS::UInteger)w * 4, region, 0);
+
+		// The drawable is BGRA; the image writers want tightly packed RGB.
+		for (size_t i = 0; i < pixels; i++) {
+			(*rgb)[i * 3 + 0] = bgra[i * 4 + 2];
+			(*rgb)[i * 3 + 1] = bgra[i * 4 + 1];
+			(*rgb)[i * 3 + 2] = bgra[i * 4 + 0];
+		}
 	}
 
 	*size = _capture_size;

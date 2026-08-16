@@ -117,6 +117,33 @@ class PSIVideo {
 		// Everything that counts frames has to see both, or a script on the
 		// pass API silently loses the benchmark and capture harnesses -- which
 		// is exactly what happened the first time this was wired up.
+		// Extended dynamic range output. Off by default; opt in from a script
+		// with psi.boot { hdr_output = true }.
+		//
+		// Call before any render pass is created: PSIRenderPass warms its
+		// pipelines against the drawable signature current at that moment, and
+		// this changes it. Returns whether EDR is on afterwards, so a script can
+		// tell whether the request took.
+		bool set_hdr_output(bool enabled) {
+			if (_metal_ctx == nullptr) {
+				return false;
+			}
+			return _metal_ctx->enable_edr_output(enabled);
+		}
+		bool get_hdr_output() const {
+			return _metal_ctx != nullptr && _metal_ctx->edr_output();
+		}
+
+		// How much brighter than SDR white the current display can go: 1.0 with
+		// no headroom, up to about 16 on an XDR panel.
+		//
+		// Poll it every frame. macOS moves it with screen brightness and thermal
+		// state, and it changes outright when the window is dragged to another
+		// display -- which is what lets a script adapt without being restarted.
+		double get_edr_headroom() const {
+			return (_metal_ctx != nullptr) ? _metal_ctx->edr_headroom() : 1.0;
+		}
+
 		void frame_presented() {
 			// Benchmark hook. See _bench_frames.
 			if (_bench_frames > 0) {

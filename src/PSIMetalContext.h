@@ -226,10 +226,26 @@ class PSIMetalContext {
 		MTL::CommandBuffer *command_buffer() const { return _cmd; }
 		MTL::RenderCommandEncoder *encoder() const { return _encoder; }
 
-		// BGRA8Unorm, fixed by CAMetalLayer. The drawable pass must match it;
-		// offscreen passes are free to differ, and PSIGLShader compiles a
-		// pipeline variant per signature.
-		MTL::PixelFormat color_format() const { return MTL::PixelFormatBGRA8Unorm; }
+		// The drawable's format. BGRA8Unorm normally; RGBA16Float when EDR
+		// output is on. The drawable pass must match it; offscreen passes are
+		// free to differ, and PSIGLShader compiles a pipeline variant per
+		// signature, so flipping this reaches the pipelines on its own.
+		MTL::PixelFormat color_format() const { return _color_format; }
+
+		// Extended dynamic range output. Off by default; a script opts in
+		// through psi.boot { hdr_output = true }.
+		//
+		// Must be called before any pass is created, because PSIRenderPass
+		// warms its pipelines against the signature current at that moment.
+		// Returns whether EDR is on afterwards -- false with `enabled` true
+		// means the layer refused.
+		bool enable_edr_output(bool enabled);
+		bool edr_output() const { return _edr_output; }
+
+		// The current display's headroom above SDR white, 1.0 if there is none.
+		// Polled rather than cached: macOS moves it with brightness and thermal
+		// state, and with the window's screen. See PSIMetalLayer.h.
+		double edr_headroom() const;
 		MTL::PixelFormat depth_format() const { return MTL::PixelFormatDepth32Float; }
 
 		// The attachment formats and sample count of the pass currently open.
@@ -264,6 +280,15 @@ class PSIMetalContext {
 
 		// CA::MetalLayer*, created in the Objective-C++ shim.
 		void *_layer = nullptr;
+
+		// Kept for layer_edr_headroom(), which needs the window to find the
+		// screen it is currently on.
+		GLFWwindow *_window = nullptr;
+
+		// The drawable's format, and whether EDR output is on. See
+		// enable_edr_output().
+		MTL::PixelFormat _color_format = MTL::PixelFormatBGRA8Unorm;
+		bool _edr_output = false;
 
 		// Depth buffer, recreated whenever the drawable size changes. The layer
 		// only provides colour.
