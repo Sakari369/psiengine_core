@@ -93,6 +93,30 @@ class PSIVideo {
 			return _viewport;
 		}
 
+		// Ask for a different supersample factor than the default of 2.
+		//
+		// Safe after init -- the context re-runs its resize -- but it must
+		// happen before anything is sized from get_render_size(), so psi.boot
+		// does it before the script gets a chance to make a render target.
+		//
+		// Refused when PSI_SUPERSAMPLE was set, so a capture or a benchmark can
+		// force the factor down and have that stick.
+		//
+		// Costs the square of the factor in fill rate: 4 is four times the
+		// pixels of 2, and the demos that ask for it should be ones where edge
+		// quality is the point.
+		void set_supersample(GLint factor) {
+			if (_metal_ctx == nullptr) {
+				return;
+			}
+			if (_supersample_pinned) {
+				psilog(PSILog::VIDEO,
+				       "Ignoring the script's supersample request; PSI_SUPERSAMPLE is set");
+				return;
+			}
+			_metal_ctx->set_supersample_factor(factor);
+		}
+
 		// The size the GPU actually renders at, which is the viewport times the
 		// supersample factor -- 2 by default, see init().
 		//
@@ -362,6 +386,10 @@ class PSIVideo {
 
 		// Show cursor ?
 		bool _cursor_disabled = false;
+
+		// Was the supersample factor set from the environment? See
+		// set_supersample().
+		bool _supersample_pinned = false;
 
 		// Selected monitor id.
 		std::string _monitor_id;

@@ -125,13 +125,24 @@ bool PSIVideo::init() {
 
 	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
 	// to get edges smoother than multisampling alone can manage.
-	// PSI_SUPERSAMPLE=1 turns it off if the fill rate cost matters.
-	int supersample = 2;
+	//
+	// 4x, meaning sixteen times the pixels of the window. That is a lot of fill
+	// rate to spend, and it is spent because four MSAA samples is not many
+	// gradations to describe a shallow edge with -- prism_grid's grazing prism
+	// silhouettes are the worst case and they need it. The demos here are small
+	// scenes; the cost lands in the single-digit milliseconds.
+	//
+	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request.
+	int supersample = 4;
 	const char *ss_env = getenv("PSI_SUPERSAMPLE");
 	if (ss_env != nullptr) {
 		int parsed = atoi(ss_env);
 		if (parsed >= 1 && parsed <= 4) {
 			supersample = parsed;
+			// Remembered so a script asking for a different factor is ignored:
+			// the environment is the escape hatch, and a benchmark or a capture
+			// forcing it down has to actually win.
+			_supersample_pinned = true;
 		}
 	}
 	_metal_ctx->set_supersample_factor(supersample);
