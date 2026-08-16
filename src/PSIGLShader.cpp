@@ -1,7 +1,10 @@
 #include "PSIGLShader.h"
 #include "PSIMetalContext.h"
 
+#include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 
 namespace {
 
@@ -93,6 +96,10 @@ PSIGLShader::~PSIGLShader() {
 		_vertex_desc->release();
 		_vertex_desc = nullptr;
 	}
+	if (_runtime_library != nullptr) {
+		_runtime_library->release();
+		_runtime_library = nullptr;
+	}
 	if (_vertex_fn != nullptr) {
 		_vertex_fn->release();
 		_vertex_fn = nullptr;
@@ -119,10 +126,130 @@ void PSIGLShader::warn_missing_uniform(const std::string &name) {
 	}
 }
 
+namespace {
+
+// Contents of assets/shaders/psi_common.h, read once.
+//
+// Runtime compilation has no file system behind it, so an #include cannot be
+// resolved -- the shared definitions have to be pasted into the source instead.
+const std::string &metal_common_prelude() {
+	static const std::string prelude = []() {
+		std::string dir = (PSI_G::asset_dir != nullptr) ? PSI_G::asset_dir : "../assets";
+		std::string path = dir + "/shaders/psi_common.h";
+
+		std::ifstream file(path);
+		if (!file.is_open()) {
+			psilog_err("Could not read %s; shaders compiled from source will "
+			           "not have the shared definitions", path.c_str());
+			return std::string();
+		}
+
+		std::stringstream buffer;
+		buffer << file.rdbuf();
+
+		std::string text = buffer.str();
+
+		// Strip "#pragma once". Harmless in the header it belongs to, but once
+		// pasted into a source string it IS the main file, and Metal warns
+		// about it on every single runtime compile.
+		const std::string pragma = "#pragma once";
+		size_t at = text.find(pragma);
+		if (at != std::string::npos) {
+			text.erase(at, pragma.size());
+		}
+
+		return text;
+	}();
+
+	return prelude;
+}
+
+// Paste the shared definitions in, wherever the source expects them.
+std::string resolve_common_include(const std::string &source) {
+	static const std::string include_line = "#include \"psi_common.h\"";
+
+	const std::string &prelude = metal_common_prelude();
+
+	size_t at = source.find(include_line);
+	if (at != std::string::npos) {
+		return source.substr(0, at) + prelude + source.substr(at + include_line.size());
+	}
+
+	// No include line: prepend, so a script can leave it out and still get
+	// PSIUniforms, the vertex input structs and psi_apply_light.
+	return prelude + "\n" + source;
+}
+
+} // namespace
+
+bool PSIGLShader::add_source(std::string source) {
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		psilog_err("Shader %s: no Metal device to compile source with",
+		           get_info_str().c_str());
+		return false;
+	}
+	if (source.empty()) {
+		psilog_err("Shader %s: empty source", get_info_str().c_str());
+		return false;
+	}
+
+	if (_runtime_library != nullptr) {
+		_runtime_library->release();
+		_runtime_library = nullptr;
+	}
+
+	const std::string full = resolve_common_include(source);
+
+	// Where the script's own first line ended up, so the compiler's line
+	// numbers -- which count the pasted prelude -- can be mapped back.
+	const size_t prelude_lines =
+		(size_t)std::count(full.begin(), full.end(), '\n') -
+		(size_t)std::count(source.begin(), source.end(), '\n');
+
+	NS::String *ns_source = NS::String::string(full.c_str(), NS::UTF8StringEncoding);
+	MTL::CompileOptions *options = MTL::CompileOptions::alloc()->init();
+
+	NS::Error *error = nullptr;
+	_runtime_library = PSI_G::metal_ctx->device()->newLibrary(ns_source, options, &error);
+
+	options->release();
+
+	if (_runtime_library == nullptr) {
+		// The compiler's own diagnostics, with line numbers -- against the
+		// source AFTER the prelude was pasted in, so the numbers will not match
+		// the script's own lines.
+		const char *msg = "unknown error";
+		if (error != nullptr && error->localizedDescription() != nullptr) {
+			msg = error->localizedDescription()->utf8String();
+		}
+		psilog_err("Shader %s: compiling source failed. Line numbers below "
+		           "count the %zu lines of psi_common.h pasted in ahead of your "
+		           "source, so subtract that to find your own line.\n%s",
+		           get_info_str().c_str(), prelude_lines, msg);
+		return false;
+	}
+
+	psilog(PSILog::OPENGL, "Shader %s: compiled %zu bytes of source at runtime",
+	       get_info_str().c_str(), full.size());
+
+	return true;
+}
+
 MTL::Function *PSIGLShader::lookup_function(const std::string &fn_name) {
 	if (PSI_G::metal_ctx == nullptr) {
 		psilog_err("No Metal context when looking up shader function \"%s\"", fn_name.c_str());
 		return nullptr;
+	}
+
+	NS::String *ns_name = NS::String::string(fn_name.c_str(), NS::UTF8StringEncoding);
+
+	// Source compiled by this shader wins, so a script can override one stage
+	// and inherit the other from the metallib.
+	if (_runtime_library != nullptr) {
+		MTL::Function *fn = _runtime_library->newFunction(ns_name);
+		if (fn != nullptr) {
+			return fn;
+		}
 	}
 
 	MTL::Library *library = PSI_G::metal_ctx->shader_library();
@@ -130,10 +257,12 @@ MTL::Function *PSIGLShader::lookup_function(const std::string &fn_name) {
 		return nullptr;
 	}
 
-	NS::String *ns_name = NS::String::string(fn_name.c_str(), NS::UTF8StringEncoding);
 	MTL::Function *fn = library->newFunction(ns_name);
 	if (fn == nullptr) {
-		psilog_err("Shader function \"%s\" not found in psishaders.metallib", fn_name.c_str());
+		psilog_err("Shader function \"%s\" not found in %s", fn_name.c_str(),
+		           _runtime_library != nullptr
+		               ? "the compiled source or psishaders.metallib"
+		               : "psishaders.metallib");
 	}
 
 	return fn;

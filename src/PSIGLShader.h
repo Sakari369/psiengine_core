@@ -214,8 +214,34 @@ class PSIGLShader {
 
 		// Select the metallib entry point for this stage from a GLSL file name.
 		bool add_from_file(ShaderType type, std::string shader_path);
-		// Runtime shader source. Not supported with a precompiled metallib.
+		// Legacy: the GLSL source is unusable, so this resolves by NAME instead.
+		// See add_source() for source that is actually compiled.
 		bool add_from_string(ShaderType type, std::string shader_str);
+
+		// Compile Metal Shading Language at runtime, and resolve this shader's
+		// entry points from the result.
+		//
+		// Everything else here comes out of psishaders.metallib, which the build
+		// compiles ahead of time from assets/shaders/*.metal. That is the right
+		// default -- compilation costs milliseconds and doing it at startup for
+		// every shader would be waste -- but it means a shader has to exist as a
+		// file in the tree before a script can use it. This is the escape hatch:
+		// a script can carry its own shader, generate one, or build variants
+		// from a template.
+		//
+		// Entry points still follow the naming convention, so a source string
+		// added to a shader named "swirl" must define vertex_swirl and
+		// fragment_swirl. Lookup checks this library first and falls back to the
+		// metallib, so a script can override one stage and inherit the other.
+		//
+		// #include does not work at runtime -- there is no file system behind
+		// the compiler -- so an `#include "psi_common.h"` line is substituted
+		// with that file's contents before compiling, and the contents are
+		// prepended if the line is absent. Source is therefore copy-pasteable
+		// between a .metal file and a script either way.
+		//
+		// Returns false and logs the compiler's own diagnostics on failure.
+		bool add_source(std::string source);
 
 		// Build the render pipeline state from the selected functions.
 		GLuint compile();
@@ -367,6 +393,10 @@ class PSIGLShader {
 		// Vertex layout, derived from the vertex function's declared attributes.
 		// Retained because every lazily built variant needs it again.
 		MTL::VertexDescriptor *_vertex_desc = nullptr;
+
+		// Library compiled from source at runtime; see add_source(). Null for
+		// the usual case of a shader living in psishaders.metallib.
+		MTL::Library *_runtime_library = nullptr;
 
 		// Entry points selected by add_from_file().
 		MTL::Function *_vertex_fn = nullptr;
