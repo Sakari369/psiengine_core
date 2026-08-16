@@ -12,6 +12,9 @@
 #include "PSIGLTexture.h"
 #include "PSIVideo.h"
 #include "PSICamera.h"
+#include "PSIRenderPass.h"
+#include "PSIRenderTarget.h"
+#include "PSIFrame.h"
 
 class PSIGLRenderer;
 typedef shared_ptr<PSIGLRenderer> GLRendererSharedPtr;
@@ -47,8 +50,29 @@ class PSIGLRenderer {
 		void shutdown();
 
 		void render(const RenderSceneSharedPtr &scene,
-			       const RenderContextSharedPtr &ctx, 
+			       const RenderContextSharedPtr &ctx,
 			       const CameraSharedPtr &camera);
+
+		// Open a frame and get the handle passes are encoded into.
+		//
+		// The handle is created once and reused, so this allocates nothing per
+		// frame. See PSIFrame for the shape this replaces.
+		const FrameSharedPtr &begin_frame();
+
+		// Present and close the frame. Called by PSIFrame::present().
+		//
+		// Goes through here rather than straight to the context so the video
+		// layer still sees the frame -- the benchmark and capture harnesses
+		// count frames in PSIVideo, and a script on the pass API would
+		// otherwise lose both.
+		void end_frame();
+
+		// Encode one pass. Called by PSIFrame; scripts go through the frame.
+		void encode_pass(const RenderPassSharedPtr &pass,
+		                 const RenderSceneSharedPtr &scene,
+		                 const CameraSharedPtr &camera);
+		void encode_fullscreen_pass(const RenderPassSharedPtr &pass,
+		                            const GLMaterialSharedPtr &material);
 
 		void draw_render_objs(const RenderSceneSharedPtr &scene,
 		                      const RenderContextSharedPtr &ctx,
@@ -157,6 +181,16 @@ class PSIGLRenderer {
 	private:
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
 		RenderContextSharedPtr _ctx;
+
+		// The frame handle handed to scripts. Created once in init().
+		FrameSharedPtr _frame;
+
+		// Shared by render() and encode_pass(): set up the matrix stacks for
+		// this camera, sort, cull and draw.
+		void draw_scene_in_pass(const RenderSceneSharedPtr &scene,
+		                        const RenderContextSharedPtr &ctx,
+		                        const CameraSharedPtr &camera,
+		                        GLboolean sorting);
 
 		// The video instance reference for accessing the video data and so on.
 		shared_ptr<PSIVideo> _video;

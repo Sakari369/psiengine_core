@@ -1,5 +1,6 @@
 #include "PSIMetalContext.h"
 #include "PSIMetalLayer.h"
+#include "PSIRenderPass.h"
 
 PSIMetalContext::~PSIMetalContext() {
 	shutdown();
@@ -209,8 +210,23 @@ void PSIMetalContext::set_msaa_samples(int samples) {
 	_msaa_samples = samples;
 	psilog(PSILog::INIT, "MSAA sample count set to %d", _msaa_samples);
 
+	// Keep the signature current outside a pass, so a shader compiled at load
+	// time builds its first pipeline against what the drawable pass will use.
+	update_pass_signature(nullptr);
+
 	// Rebuild the render targets at the new sample count.
 	create_depth_texture(_drawable_size);
+}
+
+void PSIMetalContext::update_pass_signature(MTL::Texture *color_target) {
+	// The sample count comes from the multisampled attachment when there is
+	// one, because that is what the pipeline has to declare -- not from the
+	// resolve target, which is always single-sampled.
+	_pass_signature.color_format = (color_target != nullptr)
+		? color_target->pixelFormat()
+		: color_format();
+	_pass_signature.depth_format = depth_format();
+	_pass_signature.sample_count = (uint32_t)_msaa_samples;
 }
 
 MTL::StorageMode PSIMetalContext::transient_storage_mode() const {
@@ -337,6 +353,168 @@ void PSIMetalContext::set_vsync(bool enabled) {
 	PSIMetal::set_layer_display_sync(_layer, enabled);
 }
 
+void PSIMetalContext::open_or_continue_frame() {
+	if (_frame_started) {
+		// Another pass in the same frame. Close the one already open and reuse
+		// the command buffer and the autorelease pool -- opening a second pool
+		// here would leave the first undrained.
+		end_encoding();
+		return;
+	}
+
+	_frame_pool = NS::AutoreleasePool::alloc()->init();
+	dispatch_semaphore_wait(_frame_sem, DISPATCH_TIME_FOREVER);
+	_cmd = _queue->commandBuffer();
+	_frame_started = true;
+}
+
+MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass) {
+	if (_device == nullptr) {
+		return nullptr;
+	}
+
+	const RenderTargetSharedPtr &target = pass.get_target();
+	const bool to_drawable = (target == nullptr);
+
+	if (to_drawable && _layer == nullptr) {
+		return nullptr;
+	}
+	if (!to_drawable && !target->is_valid()) {
+		psilog_err("Render pass targets an unallocated render target");
+		return nullptr;
+	}
+
+	open_or_continue_frame();
+
+	glm::ivec2 viewport_size;
+
+	if (to_drawable) {
+		// Acquire the drawable lazily, and only once per frame. It may already
+		// be held by an earlier pass, or still be null because the frame was
+		// opened by an offscreen pass that never needed one.
+		if (_drawable == nullptr) {
+			CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
+			_drawable = layer->nextDrawable();
+
+			if (_drawable == nullptr) {
+				// Occluded or minimized. present() still owns the frame slot
+				// and will commit and release it.
+				return nullptr;
+			}
+		}
+		viewport_size = _drawable_size;
+	} else {
+		viewport_size = target->get_size();
+	}
+
+	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::alloc()->init();
+
+	MTL::LoadAction load = MTL::LoadActionClear;
+	if (pass.get_load_action() == PSIRenderPass::LOAD_KEEP) {
+		load = MTL::LoadActionLoad;
+	} else if (pass.get_load_action() == PSIRenderPass::LOAD_DISCARD) {
+		load = MTL::LoadActionDontCare;
+	}
+
+	const glm::vec4 clear = pass.get_clear_color();
+
+	MTL::RenderPassColorAttachmentDescriptor *color = desc->colorAttachments()->object(0);
+	color->setLoadAction(load);
+	color->setClearColor(MTL::ClearColor::Make(clear.r, clear.g, clear.b, clear.a));
+
+	if (to_drawable) {
+		if (_msaa_texture != nullptr) {
+			color->setTexture(_msaa_texture);
+			color->setResolveTexture(_drawable->texture());
+			color->setStoreAction(MTL::StoreActionMultisampleResolve);
+			update_pass_signature(_msaa_texture);
+		} else {
+			color->setTexture(_drawable->texture());
+			color->setStoreAction(MTL::StoreActionStore);
+			update_pass_signature(_drawable->texture());
+		}
+
+		if (_depth_texture != nullptr) {
+			MTL::RenderPassDepthAttachmentDescriptor *depth = desc->depthAttachment();
+			depth->setTexture(_depth_texture);
+			depth->setLoadAction(MTL::LoadActionClear);
+			depth->setStoreAction(MTL::StoreActionDontCare);
+			depth->setClearDepth(1.0);
+		}
+	} else {
+		MTL::Texture *resolve = target->resolve_attachment();
+		color->setTexture(target->color_attachment());
+		if (resolve != nullptr) {
+			color->setResolveTexture(resolve);
+			color->setStoreAction(MTL::StoreActionMultisampleResolve);
+		} else {
+			color->setStoreAction(MTL::StoreActionStore);
+		}
+
+		MTL::Texture *depth_texture = target->depth_attachment();
+		if (depth_texture != nullptr) {
+			MTL::RenderPassDepthAttachmentDescriptor *depth = desc->depthAttachment();
+			depth->setTexture(depth_texture);
+			depth->setLoadAction(MTL::LoadActionClear);
+			// Sampleable depth has to survive the pass; transient depth must
+			// not, or its memoryless allocation becomes illegal.
+			depth->setStoreAction(target->get_depth_mode() == PSIRenderTarget::DEPTH_SAMPLE
+				? MTL::StoreActionStore
+				: MTL::StoreActionDontCare);
+			depth->setClearDepth(1.0);
+		}
+
+		_pass_signature = target->signature();
+	}
+
+	_encoder = _cmd->renderCommandEncoder(desc);
+	desc->release();
+
+	if (_encoder == nullptr) {
+		psilog_err("Failed creating render command encoder");
+		return nullptr;
+	}
+
+	// Counter-clockwise front faces, as the OpenGL defaults the engine relied
+	// on. Metal defaults to clockwise.
+	_encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+	_encoder->setViewport(MTL::Viewport{
+		0.0, 0.0,
+		static_cast<double>(viewport_size.x),
+		static_cast<double>(viewport_size.y),
+		0.0, 1.0
+	});
+
+	// Pass-level state. These used to be renderer-wide fields applied once per
+	// frame, which is why a scene could not mix culled and unculled objects.
+	switch (pass.get_cull_mode()) {
+	case PSIRenderPass::CULL_FRONT:
+		_encoder->setCullMode(MTL::CullModeFront);
+		break;
+	case PSIRenderPass::CULL_BACK:
+		_encoder->setCullMode(MTL::CullModeBack);
+		break;
+	case PSIRenderPass::CULL_NONE:
+	default:
+		_encoder->setCullMode(MTL::CullModeNone);
+		break;
+	}
+
+	_encoder->setTriangleFillMode(pass.get_fill_mode() == PSIRenderPass::FILL_LINES
+		? MTL::TriangleFillModeLines
+		: MTL::TriangleFillModeFill);
+
+	// Depth testing on by default, as PSIGLRenderer::init() did with
+	// glEnable(GL_DEPTH_TEST).
+	set_depth_test_enabled(true);
+
+	// A new encoder starts with no pipeline bound, so nothing may draw until a
+	// shader binds one.
+	_current_shader = nullptr;
+
+	return _encoder;
+}
+
 MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_color) {
 	if (_device == nullptr || _layer == nullptr) {
 		return nullptr;
@@ -382,9 +560,11 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 		color->setTexture(_msaa_texture);
 		color->setResolveTexture(_drawable->texture());
 		color->setStoreAction(MTL::StoreActionMultisampleResolve);
+		update_pass_signature(_msaa_texture);
 	} else {
 		color->setTexture(_drawable->texture());
 		color->setStoreAction(MTL::StoreActionStore);
+		update_pass_signature(_drawable->texture());
 	}
 
 	if (_depth_texture != nullptr) {
@@ -519,9 +699,11 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_offscreen_frame(MTL::Texture *
 		color->setTexture(_offscreen_msaa);
 		color->setResolveTexture(target);
 		color->setStoreAction(MTL::StoreActionMultisampleResolve);
+		update_pass_signature(_offscreen_msaa);
 	} else {
 		color->setTexture(target);
 		color->setStoreAction(MTL::StoreActionStore);
+		update_pass_signature(target);
 	}
 
 	MTL::RenderPassDepthAttachmentDescriptor *depth = pass->depthAttachment();

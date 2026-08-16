@@ -87,6 +87,17 @@ class PSIGLMaterial {
 			return _shader;
 		}
 
+		// Bind every texture this material carries onto the active encoder.
+		//
+		// One slot for now; Phase 5 of the API work replaces this with a
+		// name -> texture map resolved against the shader's reflected binding
+		// indices, so a material can carry albedo plus normal plus roughness.
+		void bind_textures() const {
+			if (_texture != nullptr) {
+				_texture->bind();
+			}
+		}
+
 		// Draw-path accessors.
 		//
 		// The by-value getters above are what Lua binds and they stay, but every

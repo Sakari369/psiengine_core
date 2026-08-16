@@ -75,12 +75,23 @@ class PSIGLShader {
 			attribLocation_MAX = ANGLE
 		};
 
-		PSIGLShader() = default;
+		PSIGLShader();
 		~PSIGLShader();
 
 		static ShaderSharedPtr create() {
 			return make_shared<PSIGLShader>();
 		}
+
+		// Every live shader, in creation order.
+		//
+		// Self-maintaining: a shader adds itself on construction and removes
+		// itself on destruction. It has to work that way because scripts build
+		// shaders with a bare PSIGLShader() through psi/shader.lua and never go
+		// near PSIResourceManager, so there is no other place that sees them
+		// all. PSIRenderPass::warm_pipelines() walks this.
+		//
+		// Raw pointers deliberately -- this must not keep a shader alive.
+		static const std::vector<PSIGLShader *> &all();
 
 		// The uniforms the draw path writes on every object, every frame.
 		//
@@ -147,12 +158,20 @@ class PSIGLShader {
 
 		// Make this shader's pipeline state current on the active encoder.
 		//
-		// Blending is baked into a Metal pipeline, so a shader that has to be
-		// available both ways needs two of them. compile() builds both and this
-		// picks one; blended is the default because that is what the GL renderer
-		// did globally, and it is the only safe answer without knowing the
-		// material. See PSIGLMaterial::set_blending().
+		// Which pipeline that is depends on two things Metal bakes in: whether
+		// blending is on, and the signature of the pass being encoded (see
+		// PSIMetal::pass_signature). The matching variant is built on first use
+		// and cached. Blended is the default because that is what the GL
+		// renderer did globally, and it is the only safe answer without knowing
+		// the material. See PSIGLMaterial::set_blending().
 		void use_program(bool blended = true);
+
+		// Build both blend variants for this pass signature up front.
+		//
+		// Pipeline creation costs milliseconds, so a pass that is first encoded
+		// mid-animation would otherwise stutter on its opening frame. Passes
+		// call this when they are created, which is setup time.
+		void warm_pipelines(const PSIMetal::pass_signature &sig);
 
 		// Return this uniform's index, or INVALID_UNIFORM if the shader has no
 		// such uniform.
@@ -240,23 +259,90 @@ class PSIGLShader {
 			return std::to_string(_program) + ":" + _name;
 		}
 
+		// Does this shader have a pipeline bound draws can go through?
+		//
+		// Not the same question as "did compile() succeed" -- a capture-only
+		// program (polyform: a vertex stage and no fragment stage) compiles
+		// successfully and deliberately has no pipeline. Use is_compiled() to
+		// test for failure.
 		bool is_valid() const {
-			return _pipeline != nullptr;
+			return !_pipelines.empty();
 		}
 
-		// The compiled pipeline state, for the renderer.
-		MTL::RenderPipelineState *get_pipeline() const {
-			return _pipeline;
+		// Did compile() succeed?
+		//
+		// This exists because compile()'s return value cannot answer it. It
+		// returns LINK_FAILED (0) or COMPILE_FAILED (1) on the way out, and
+		// _program on success -- but _program is handed out by a counter that
+		// starts at 1, so the first shader built in a process returns a success
+		// value numerically equal to COMPILE_FAILED. The return type is GLuint
+		// as well, so the INVALID_SHADER (-1) that every caller in
+		// assets/scripts/psi/shader.lua tests against is doubly unreachable.
+		//
+		// The practical effect before this existed: a shader that failed to
+		// build produced a live object, use_program() unbound the encoder and
+		// logged once, and the object silently vanished from the scene with no
+		// Lua-visible signal at all.
+		bool is_compiled() const {
+			return _compiled;
 		}
 
 	private:
-		// Our pipeline state, the Metal equivalent of a linked program.
-		// This one has blending enabled; it is the fallback for everything.
-		MTL::RenderPipelineState *_pipeline = nullptr;
-		// The same pipeline with blending off, built from the same descriptor.
-		// Null if it failed to build, in which case use_program() falls back to
-		// the blended one -- correct, just slower.
-		MTL::RenderPipelineState *_pipeline_opaque = nullptr;
+		// One pipeline per (pass signature, blend) combination.
+		//
+		// Blending, the attachment formats and the sample count are all baked
+		// into an MTLRenderPipelineState, so a shader used in two passes that
+		// differ in any of them needs one object per combination. They are built
+		// on demand and kept for the shader's lifetime; in practice a scene uses
+		// two or three per shader.
+		struct pipeline_key {
+			uint32_t color_format;
+			uint32_t depth_format;
+			uint32_t sample_count;
+			uint32_t blended;
+
+			bool operator==(const pipeline_key &rhs) const {
+				return color_format == rhs.color_format &&
+				       depth_format == rhs.depth_format &&
+				       sample_count == rhs.sample_count &&
+				       blended == rhs.blended;
+			}
+		};
+
+		struct pipeline_key_hash {
+			size_t operator()(const pipeline_key &k) const {
+				// Formats are small enums and the sample count is 1..8, so
+				// shifting them into one word collides only across absurd
+				// values.
+				size_t h = k.color_format;
+				h = h * 31 + k.depth_format;
+				h = h * 31 + k.sample_count;
+				h = h * 31 + k.blended;
+				return h;
+			}
+		};
+
+		static pipeline_key make_key(const PSIMetal::pass_signature &sig, bool blended) {
+			return pipeline_key{
+				(uint32_t)sig.color_format,
+				(uint32_t)sig.depth_format,
+				sig.sample_count,
+				blended ? 1u : 0u,
+			};
+		}
+
+		std::unordered_map<pipeline_key, MTL::RenderPipelineState *, pipeline_key_hash> _pipelines;
+
+		// Look the variant up, building it on a miss. Null if it cannot be built.
+		MTL::RenderPipelineState *pipeline_for(const PSIMetal::pass_signature &sig, bool blended);
+		// Create one variant. reflection is non-null only for the first build,
+		// which is where the uniform block is resolved.
+		MTL::RenderPipelineState *build_pipeline(const PSIMetal::pass_signature &sig, bool blended,
+		                                         MTL::AutoreleasedRenderPipelineReflection *reflection);
+
+		// Vertex layout, derived from the vertex function's declared attributes.
+		// Retained because every lazily built variant needs it again.
+		MTL::VertexDescriptor *_vertex_desc = nullptr;
 
 		// Entry points selected by add_from_file().
 		MTL::Function *_vertex_fn = nullptr;
@@ -273,6 +359,9 @@ class PSIGLShader {
 		// Program id. Not a GL name any more, just a stable handle for logging
 		// and for the Lua-visible get_program().
 		GLuint _program = ShaderDefs::INVALID_SHADER;
+
+		// Did compile() reach the end without failing? See is_compiled().
+		bool _compiled = false;
 
 		// Name for this shader.
 		std::string _name;

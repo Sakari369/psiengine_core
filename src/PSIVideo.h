@@ -100,11 +100,24 @@ class PSIVideo {
 		// Presents the frame the renderer encoded. Under OpenGL this was
 		// glfwSwapBuffers; with Metal the presentation is part of the command
 		// buffer, so this ends encoding, presents the drawable and commits.
+		//
+		// The pass-based path presents through PSIFrame instead, which reaches
+		// frame_presented() by its own route.
 		void flip() {
 			if (_metal_ctx != nullptr) {
 				_metal_ctx->present();
 			}
+			frame_presented();
+		}
 
+		// One frame has been shown.
+		//
+		// Split out of flip() because the frame can now be closed from two
+		// places: a script calling psi.video:flip(), or PSIFrame::present().
+		// Everything that counts frames has to see both, or a script on the
+		// pass API silently loses the benchmark and capture harnesses -- which
+		// is exactly what happened the first time this was wired up.
+		void frame_presented() {
 			// Benchmark hook. See _bench_frames.
 			if (_bench_frames > 0) {
 				bench_sample();

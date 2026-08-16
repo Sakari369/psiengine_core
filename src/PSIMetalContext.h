@@ -19,6 +19,7 @@
 
 struct GLFWwindow;
 class PSIGLShader;
+class PSIRenderPass;
 
 class PSIMetalContext;
 typedef shared_ptr<PSIMetalContext> MetalContextSharedPtr;
@@ -61,6 +62,26 @@ class PSIMetalContext {
 		// to present.
 		MTL::RenderCommandEncoder *begin_offscreen_frame(MTL::Texture *target,
 		                                                 const glm::vec4 &clear_color);
+
+		// Open a pass described by a PSIRenderPass, into its target or into the
+		// drawable.
+		//
+		// Supersedes begin_frame()/begin_offscreen_frame(), which between them
+		// could only express "clear into the drawable" and "clear into the one
+		// offscreen texture". This honours the pass's load action, clear colour,
+		// cull mode and fill mode, and can open any number of passes into one
+		// command buffer -- the first opens the frame, the rest reuse it, and
+		// present() closes and commits.
+		//
+		// Returns nullptr when there is nothing to draw into: a drawable pass
+		// with the window occluded, or a target that failed to allocate.
+		MTL::RenderCommandEncoder *begin_pass(const PSIRenderPass &pass);
+
+		// Close the pass currently open without committing the frame.
+		//
+		// Only needed when a frame ends without presenting; begin_pass() closes
+		// the previous pass itself, and present() closes the last one.
+		void end_pass() { end_encoding(); }
 
 		// Ends encoding, presents the drawable and commits. Safe to call when no
 		// frame was begun -- a script that calls flip() without render() just
@@ -187,9 +208,20 @@ class PSIMetalContext {
 		MTL::CommandBuffer *command_buffer() const { return _cmd; }
 		MTL::RenderCommandEncoder *encoder() const { return _encoder; }
 
-		// BGRA8Unorm, fixed by CAMetalLayer. Render pipelines must match it.
+		// BGRA8Unorm, fixed by CAMetalLayer. The drawable pass must match it;
+		// offscreen passes are free to differ, and PSIGLShader compiles a
+		// pipeline variant per signature.
 		MTL::PixelFormat color_format() const { return MTL::PixelFormatBGRA8Unorm; }
 		MTL::PixelFormat depth_format() const { return MTL::PixelFormatDepth32Float; }
+
+		// The attachment formats and sample count of the pass currently open.
+		//
+		// PSIGLShader::use_program() reads this to pick, or build, the pipeline
+		// variant matching the pass being encoded. Valid between begin_frame()
+		// or begin_offscreen_frame() and present(); outside a pass it holds the
+		// drawable's signature, which is the right default for warming a cache
+		// at load time.
+		const PSIMetal::pass_signature &pass_signature() const { return _pass_signature; }
 
 		glm::ivec2 get_drawable_size() const { return _drawable_size; }
 
@@ -198,6 +230,15 @@ class PSIMetalContext {
 		std::string get_device_info_str() const;
 
 		bool is_valid() const { return _device != nullptr; }
+
+		// Storage mode for render targets that never outlive their pass.
+		//
+		// Memoryless on Apple GPUs: the attachment lives only in tile memory,
+		// no DRAM is allocated and nothing is written back. Legal only while
+		// every pass using it clears on load and DontCare/MultisampleResolve on
+		// store. Public because PSIRenderTarget allocates its own transient
+		// depth the same way.
+		MTL::StorageMode transient_storage_mode() const;
 
 	private:
 		MTL::Device *_device = nullptr;
@@ -264,6 +305,11 @@ class PSIMetalContext {
 		// Non-owning: the shader whose pipeline is set on the encoder.
 		PSIGLShader *_current_shader = nullptr;
 
+		// Signature of the pass currently open; see pass_signature().
+		PSIMetal::pass_signature _pass_signature;
+		// Recompute it from the current targets. Called as each pass opens.
+		void update_pass_signature(MTL::Texture *color_target);
+
 		// Per-frame state, valid between begin_frame() and present().
 		CA::MetalDrawable *_drawable = nullptr;
 		MTL::CommandBuffer *_cmd = nullptr;
@@ -286,6 +332,8 @@ class PSIMetalContext {
 		bool create_depth_texture(glm::ivec2 size);
 		void end_encoding();
 
-		// Storage mode for render targets that never outlive their pass.
-		MTL::StorageMode transient_storage_mode() const;
+		// Shared by begin_frame(), begin_offscreen_frame() and begin_pass():
+		// take the frame slot and open the command buffer if this is the first
+		// pass of the frame, otherwise close the pass already open and reuse it.
+		void open_or_continue_frame();
 };

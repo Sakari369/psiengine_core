@@ -47,6 +47,9 @@ set(SOURCES
 	src/ext/fpng.cpp
 	src/ext/metal_cpp_impl.cpp
 	src/PSIMetalContext.cpp
+	src/PSIRenderTarget.cpp
+	src/PSIRenderPass.cpp
+	src/PSIFrame.cpp
 	# Objective-C++: the only AppKit/CAMetalLayer glue in the engine.
 	src/PSIMetalLayer.mm
 	src/PSIAudio.cpp

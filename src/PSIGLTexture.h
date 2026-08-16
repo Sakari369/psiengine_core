@@ -131,10 +131,18 @@ class PSIGLTexture {
 	MTL::Texture *get_metal_texture() const { return _texture; }
 	MTL::SamplerState *get_sampler() const { return _sampler; }
 
-	// Allocate this texture as a colour render target that can also be sampled.
-	// Used by PSIGLRenderer::init_offscreen_texture(); must be the swapchain's
-	// pixel format, since render pipelines bake that in.
+	// Allocate this texture as a render target that can also be sampled.
+	//
+	// The no-format overload uses the swapchain's colour format, which is what
+	// PSIGLRenderer::init_offscreen_texture() wants. The other takes any format
+	// the device supports, including float colour and depth: pipelines bake the
+	// attachment format in, and PSIGLShader compiles a variant per pass
+	// signature rather than requiring everything to match the swapchain.
+	//
+	// samples > 1 makes a multisample attachment, which cannot be sampled --
+	// PSIRenderTarget pairs one of those with a single-sampled resolve texture.
 	bool create_render_target(GLint width, GLint height);
+	bool create_render_target(GLint width, GLint height, GLuint pixel_format, GLint samples);
 
 	private:
 	// Allocate the MTLTexture for the current size/format/target.

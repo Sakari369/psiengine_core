@@ -38,4 +38,28 @@ enum BufferIndex {
 // semaphore in PSIMetalContext; sizes the uniform ring buffer.
 constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 
+// Everything about a render pass that a pipeline has to be built against.
+//
+// Metal bakes the attachment formats and the sample count into every
+// MTLRenderPipelineState, so a shader cannot be used in a pass whose targets
+// differ from the ones its pipeline was compiled for. That is why offscreen
+// targets were previously required to match the swapchain exactly.
+//
+// PSIGLShader keys its pipeline cache on this, so a pass can render into any
+// format it likes and the shader compiles a variant for it on first use.
+struct pass_signature {
+	MTL::PixelFormat color_format = MTL::PixelFormatBGRA8Unorm;
+	MTL::PixelFormat depth_format = MTL::PixelFormatDepth32Float;
+	uint32_t sample_count = 1;
+
+	bool operator==(const pass_signature &rhs) const {
+		return color_format == rhs.color_format &&
+		       depth_format == rhs.depth_format &&
+		       sample_count == rhs.sample_count;
+	}
+	bool operator!=(const pass_signature &rhs) const {
+		return !(*this == rhs);
+	}
+};
+
 } // namespace PSIMetal

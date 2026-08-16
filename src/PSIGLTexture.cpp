@@ -110,6 +110,12 @@ bool PSIGLTexture::create_texture(GLint width, GLint height, GLuint face_count) 
 }
 
 bool PSIGLTexture::create_render_target(GLint width, GLint height) {
+	return create_render_target(width, height,
+	                            (GLuint)PSI_G::metal_ctx->color_format(), 1);
+}
+
+bool PSIGLTexture::create_render_target(GLint width, GLint height,
+                                        GLuint pixel_format, GLint samples) {
 	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
 		psilog_err("No Metal device when creating render target");
 		return false;
@@ -117,39 +123,60 @@ bool PSIGLTexture::create_render_target(GLint width, GLint height) {
 	if (width <= 0 || height <= 0) {
 		return false;
 	}
+	if (samples < 1) {
+		samples = 1;
+	}
 
 	if (_texture != nullptr) {
 		_texture->release();
 		_texture = nullptr;
 	}
 
+	const MTL::PixelFormat format = (MTL::PixelFormat)pixel_format;
+	const bool multisampled = samples > 1;
+	const bool is_depth = (format == MTL::PixelFormatDepth32Float ||
+	                       format == MTL::PixelFormatDepth16Unorm);
+
 	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
-	desc->setTextureType(MTL::TextureType2D);
-	// Must match PSIMetalContext::color_format(): pipelines bake the colour
-	// attachment format in, so an offscreen target in another format would need
-	// a second pipeline per shader.
-	desc->setPixelFormat(PSI_G::metal_ctx->color_format());
+	desc->setTextureType(multisampled ? MTL::TextureType2DMultisample : MTL::TextureType2D);
+	desc->setSampleCount(static_cast<NS::UInteger>(samples));
+	// Any format the device supports as a render target. Pipelines bake the
+	// attachment format in, which is why offscreen targets used to be pinned to
+	// the swapchain's -- PSIGLShader now keys its pipeline cache on the pass
+	// signature and compiles a variant per format instead.
+	desc->setPixelFormat(format);
 	desc->setWidth(static_cast<NS::UInteger>(width));
 	desc->setHeight(static_cast<NS::UInteger>(height));
 	desc->setMipmapLevelCount(1);
 	desc->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+	// Sampleable, so it has to live in real memory -- this is the opposite of
+	// the transient attachments PSIMetalContext allocates memoryless.
 	desc->setStorageMode(MTL::StorageModePrivate);
 
 	_texture = PSI_G::metal_ctx->device()->newTexture(desc);
 	desc->release();
 
 	if (_texture == nullptr) {
-		psilog_err("Failed creating %dx%d render target", width, height);
+		psilog_err("Failed creating %dx%d render target (format %u, %d samples)",
+		           width, height, pixel_format, samples);
 		return false;
 	}
 
 	_id = next_texture_id();
 	_target = GL_TEXTURE_2D;
 	_has_mipmaps = false;
+	_samples = samples;
 	set_size(glm::vec2(width, height));
+
+	// A depth texture sampled with a linear filter is not universally supported;
+	// nearest is always valid and is what a depth lookup wants anyway.
+	if (is_depth) {
+		_sample_mode = TexSampleMode::NEAREST | TexSampleMode::CLAMP;
+	}
 	rebuild_sampler();
 
-	psilog(PSILog::TEXTURE, "Created %dx%d render target, id = %d", width, height, _id);
+	psilog(PSILog::TEXTURE, "Created %dx%d render target (format %u, %d samples), id = %d",
+	       width, height, pixel_format, samples, _id);
 
 	return true;
 }

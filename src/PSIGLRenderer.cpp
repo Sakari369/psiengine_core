@@ -263,6 +263,9 @@ GLint PSIGLRenderer::init() {
 	_ctx->model.push(glm::mat4(1.0f));
 	_ctx->view.push(glm::mat4(1.0f));
 
+	// One frame handle, reused every frame; see PSIFrame.
+	_frame = PSIFrame::create(this);
+
 	return 0;
 }
 
@@ -378,6 +381,19 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 	// equation this used to enable per frame. Wireframe is handled by the
 	// setTriangleFillMode() call above.
 
+	draw_scene_in_pass(scene, ctx, camera, _sorting);
+
+	// Nothing to restore: the GL path had to switch blending and polygon mode
+	// back off because they were global state. Encoder state does not outlive
+	// the pass, and the next begin_frame() sets everything again.
+
+	//psilog(PSILog::FREQ, "Scene rendered");
+}
+
+void PSIGLRenderer::draw_scene_in_pass(const RenderSceneSharedPtr &scene,
+                                       const RenderContextSharedPtr &ctx,
+                                       const CameraSharedPtr &camera,
+                                       GLboolean sorting) {
 	// Store the camera in our context.
 	// This way the objects have access to it via the context.
 	ctx->camera = camera;
@@ -399,7 +415,7 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 
 			if (scene->m_render_objs.empty() != true) {
 				// Sort our scene objects.
-				if (_sorting == true) {
+				if (sorting == true) {
 					scene->sort(camera->get_pos());
 				}
 				// Draw render objects in the scene.
@@ -407,12 +423,83 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 			}
 		ctx->view.pop();
 	ctx->projection.pop();
+}
 
-	// Nothing to restore: the GL path had to switch blending and polygon mode
-	// back off because they were global state. Encoder state does not outlive
-	// the pass, and the next begin_frame() sets everything again.
+void PSIGLRenderer::end_frame() {
+	if (_metal_ctx != nullptr) {
+		_metal_ctx->present();
+	}
+	// The frame counters that drive the benchmark and capture harnesses live in
+	// PSIVideo, and a pass-based script never calls its flip().
+	if (_video != nullptr) {
+		_video->frame_presented();
+	}
+}
 
-	//psilog(PSILog::FREQ, "Scene rendered");
+const FrameSharedPtr &PSIGLRenderer::begin_frame() {
+	// The handle is reused, so opening a frame allocates nothing. The command
+	// buffer itself is opened lazily by the first pass encoded, which is what
+	// lets a frame consist of offscreen passes only.
+	_frame->_pass_index = 0;
+
+	return _frame;
+}
+
+void PSIGLRenderer::encode_pass(const RenderPassSharedPtr &pass,
+                                const RenderSceneSharedPtr &scene,
+                                const CameraSharedPtr &camera) {
+	if (_metal_ctx == nullptr || pass == nullptr) {
+		return;
+	}
+
+	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_pass(*pass);
+	if (encoder == nullptr) {
+		// No drawable this frame (occluded), or the target failed to allocate.
+		return;
+	}
+
+	if (scene != nullptr && camera != nullptr) {
+		draw_scene_in_pass(scene, _ctx, camera, pass->get_sorting());
+	}
+}
+
+void PSIGLRenderer::encode_fullscreen_pass(const RenderPassSharedPtr &pass,
+                                           const GLMaterialSharedPtr &material) {
+	if (_metal_ctx == nullptr || pass == nullptr || material == nullptr) {
+		return;
+	}
+
+	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_pass(*pass);
+	if (encoder == nullptr) {
+		return;
+	}
+
+	const ShaderSharedPtr &shader = material->shader_ref();
+	if (shader == nullptr) {
+		psilog_err("Full-screen pass has a material with no shader");
+		return;
+	}
+
+	// Full-screen passes are never blended: they replace the whole target.
+	shader->use_program(false);
+	if (!_metal_ctx->has_valid_pipeline()) {
+		return;
+	}
+
+	material->bind_textures();
+
+	// Elapsed time is the one uniform a post-processing shader is likely to
+	// want; the rest of the block is about objects, and there is no object.
+	shader->set_uniform(shader->hot().elapsed_time, _ctx->elapsed_time);
+	shader->set_uniform(shader->hot().color, material->get_color());
+	shader->bind_uniforms();
+
+	// Three vertices, no vertex buffers and no index buffer: the vertex shader
+	// builds a triangle that covers the target from vertex_id alone. A quad
+	// would need geometry, and covering the screen with one triangle avoids the
+	// diagonal seam two would create.
+	encoder->drawPrimitives(MTL::PrimitiveTypeTriangle,
+	                        (NS::UInteger)0, (NS::UInteger)3);
 }
 
 GLint PSIGLRenderer::set_draw_mode(GLint draw_mode) {

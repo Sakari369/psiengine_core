@@ -54,14 +54,44 @@ MTL::VertexFormat vertex_format_for(MTL::DataType type) {
 
 } // namespace
 
+namespace {
+
+// Function-local static, so the registry is alive before the first shader is
+// constructed regardless of translation unit initialisation order.
+std::vector<PSIGLShader *> &shader_registry() {
+	static std::vector<PSIGLShader *> registry;
+	return registry;
+}
+
+} // namespace
+
+const std::vector<PSIGLShader *> &PSIGLShader::all() {
+	return shader_registry();
+}
+
+PSIGLShader::PSIGLShader() {
+	shader_registry().push_back(this);
+}
+
 PSIGLShader::~PSIGLShader() {
-	if (_pipeline != nullptr) {
-		_pipeline->release();
-		_pipeline = nullptr;
+	std::vector<PSIGLShader *> &registry = shader_registry();
+	for (size_t i = 0; i < registry.size(); i++) {
+		if (registry[i] == this) {
+			registry.erase(registry.begin() + i);
+			break;
+		}
 	}
-	if (_pipeline_opaque != nullptr) {
-		_pipeline_opaque->release();
-		_pipeline_opaque = nullptr;
+
+	for (auto &entry : _pipelines) {
+		if (entry.second != nullptr) {
+			entry.second->release();
+		}
+	}
+	_pipelines.clear();
+
+	if (_vertex_desc != nullptr) {
+		_vertex_desc->release();
+		_vertex_desc = nullptr;
 	}
 	if (_vertex_fn != nullptr) {
 		_vertex_fn->release();
@@ -224,7 +254,111 @@ MTL::VertexDescriptor *PSIGLShader::build_vertex_descriptor() {
 	return desc;
 }
 
+MTL::RenderPipelineState *PSIGLShader::build_pipeline(
+		const PSIMetal::pass_signature &sig, bool blended,
+		MTL::AutoreleasedRenderPipelineReflection *reflection) {
+
+	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
+		return nullptr;
+	}
+	if (_vertex_fn == nullptr || _fragment_fn == nullptr) {
+		return nullptr;
+	}
+
+	MTL::RenderPipelineDescriptor *desc = MTL::RenderPipelineDescriptor::alloc()->init();
+
+	desc->setVertexFunction(_vertex_fn);
+	desc->setFragmentFunction(_fragment_fn);
+	desc->setVertexDescriptor(_vertex_desc);
+
+	MTL::RenderPipelineColorAttachmentDescriptor *color = desc->colorAttachments()->object(0);
+	color->setPixelFormat(sig.color_format);
+
+	// The GL renderer enabled GL_BLEND with SRC_ALPHA / ONE_MINUS_SRC_ALPHA for
+	// the whole frame. In Metal it is baked in, so it is part of the key.
+	color->setBlendingEnabled(blended);
+	if (blended) {
+		color->setRgbBlendOperation(MTL::BlendOperationAdd);
+		color->setAlphaBlendOperation(MTL::BlendOperationAdd);
+		color->setSourceRGBBlendFactor(MTL::BlendFactorSourceAlpha);
+		color->setSourceAlphaBlendFactor(MTL::BlendFactorSourceAlpha);
+		color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+		color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+	}
+
+	desc->setDepthAttachmentPixelFormat(sig.depth_format);
+	desc->setSampleCount(static_cast<NS::UInteger>(sig.sample_count));
+
+	NS::Error *error = nullptr;
+	MTL::RenderPipelineState *pipeline = nullptr;
+
+	if (reflection != nullptr) {
+		pipeline = PSI_G::metal_ctx->device()->newRenderPipelineState(
+			desc,
+			MTL::PipelineOptionArgumentInfo | MTL::PipelineOptionBufferTypeInfo,
+			reflection,
+			&error);
+	} else {
+		pipeline = PSI_G::metal_ctx->device()->newRenderPipelineState(desc, &error);
+	}
+
+	if (pipeline == nullptr) {
+		const char *msg = "unknown error";
+		if (error != nullptr && error->localizedDescription() != nullptr) {
+			msg = error->localizedDescription()->utf8String();
+		}
+		psilog_err("Shader %s: pipeline creation failed (%s colour format %u, "
+		           "depth format %u, %u samples): %s",
+		           get_info_str().c_str(), blended ? "blended" : "opaque",
+		           (unsigned)sig.color_format, (unsigned)sig.depth_format,
+		           sig.sample_count, msg);
+	}
+
+	desc->release();
+
+	return pipeline;
+}
+
+MTL::RenderPipelineState *PSIGLShader::pipeline_for(const PSIMetal::pass_signature &sig,
+                                                    bool blended) {
+	const pipeline_key key = make_key(sig, blended);
+
+	auto it = _pipelines.find(key);
+	if (it != _pipelines.end()) {
+		return it->second;
+	}
+
+	// First time this shader is drawn into a pass with this signature. Building
+	// costs milliseconds, which is why passes warm their pipelines at creation.
+	MTL::RenderPipelineState *pipeline = build_pipeline(sig, blended, nullptr);
+
+	// Cache the failure too, as null: a pipeline that cannot be built will not
+	// start building, and retrying it on every draw would be a stall per frame.
+	_pipelines[key] = pipeline;
+
+	if (pipeline == nullptr && blended == false) {
+		// Fall back to the blended variant rather than dropping the draw. Same
+		// picture, just without the hidden-surface-removal benefit.
+		return pipeline_for(sig, true);
+	}
+
+	return pipeline;
+}
+
+void PSIGLShader::warm_pipelines(const PSIMetal::pass_signature &sig) {
+	if (!_compiled) {
+		return;
+	}
+	pipeline_for(sig, true);
+	pipeline_for(sig, false);
+}
+
 GLuint PSIGLShader::compile() {
+	// Every early return below is a failure; success sets this back at the two
+	// points that reach one. See is_compiled() for why the return value cannot
+	// carry this itself.
+	_compiled = false;
+
 	if (PSI_G::metal_ctx == nullptr || PSI_G::metal_ctx->device() == nullptr) {
 		psilog_err("Shader %s: no Metal device", get_info_str().c_str());
 		return ShaderDefs::LINK_FAILED;
@@ -247,6 +381,9 @@ GLuint PSIGLShader::compile() {
 		       "Shader %s: capture-only program (no fragment stage); "
 		       "geometry is generated in the render pass instead",
 		       get_info_str().c_str());
+		// Compiled, deliberately without a pipeline -- is_valid() stays false
+		// for this one and that is correct.
+		_compiled = true;
 		return _program;
 	}
 
@@ -274,66 +411,28 @@ GLuint PSIGLShader::compile() {
 		return ShaderDefs::COMPILE_FAILED;
 	}
 
-	MTL::RenderPipelineDescriptor *pipeline_desc =
-		MTL::RenderPipelineDescriptor::alloc()->init();
+	// Vertex layout, kept: every pipeline variant built later needs it again.
+	_vertex_desc = build_vertex_descriptor();
 
-	pipeline_desc->setVertexFunction(_vertex_fn);
-	pipeline_desc->setFragmentFunction(_fragment_fn);
-
-	MTL::VertexDescriptor *vertex_desc = build_vertex_descriptor();
-	pipeline_desc->setVertexDescriptor(vertex_desc);
-
-	MTL::RenderPipelineColorAttachmentDescriptor *color =
-		pipeline_desc->colorAttachments()->object(0);
-	color->setPixelFormat(PSI_G::metal_ctx->color_format());
-
-	// The GL renderer enabled GL_BLEND with SRC_ALPHA / ONE_MINUS_SRC_ALPHA for
-	// the whole frame. In Metal blending is baked into the pipeline, so this
-	// builds the blended variant first and the opaque one from the same
-	// descriptor below.
-	color->setBlendingEnabled(true);
-	color->setRgbBlendOperation(MTL::BlendOperationAdd);
-	color->setAlphaBlendOperation(MTL::BlendOperationAdd);
-	color->setSourceRGBBlendFactor(MTL::BlendFactorSourceAlpha);
-	color->setSourceAlphaBlendFactor(MTL::BlendFactorSourceAlpha);
-	color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
-	color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
-
-	pipeline_desc->setDepthAttachmentPixelFormat(PSI_G::metal_ctx->depth_format());
-
-	// Must match the render pass's sample count exactly, or pipeline creation
-	// fails. This is why MSAA has to be decided before any shader compiles.
-	pipeline_desc->setSampleCount(
-		static_cast<NS::UInteger>(PSI_G::metal_ctx->get_msaa_samples()));
-
-	NS::Error *error = nullptr;
-	MTL::AutoreleasedRenderPipelineReflection reflection = nullptr;
-
-	_pipeline = PSI_G::metal_ctx->device()->newRenderPipelineState(
-		pipeline_desc,
-		MTL::PipelineOptionArgumentInfo | MTL::PipelineOptionBufferTypeInfo,
-		&reflection,
-		&error);
-
-	if (_pipeline == nullptr) {
-		const char *msg = "unknown error";
-		if (error != nullptr && error->localizedDescription() != nullptr) {
-			msg = error->localizedDescription()->utf8String();
-		}
-		psilog_err("Shader %s: pipeline creation failed: %s", get_info_str().c_str(), msg);
-		vertex_desc->release();
-		pipeline_desc->release();
-		return ShaderDefs::LINK_FAILED;
-	}
-
-	// Reflect straight away: the reflection object is autoreleased and only
-	// valid here, and add_uniforms() is called separately by the scripts.
+	// Build the first variant against the pass signature in force right now --
+	// the drawable's -- and reflect while doing it. Reflection needs a pipeline
+	// creation to hang off, and the reflection object is autoreleased and valid
+	// only inside that call, so this is the one build that asks for it.
 	_uniforms.clear();
 	_uniform_members.clear();
 	_fragment_has_uniforms = false;
 
+	const PSIMetal::pass_signature &sig = PSI_G::metal_ctx->pass_signature();
+
+	MTL::AutoreleasedRenderPipelineReflection reflection = nullptr;
+	MTL::RenderPipelineState *first = build_pipeline(sig, true, &reflection);
+	if (first == nullptr) {
+		return ShaderDefs::LINK_FAILED;
+	}
+	_pipelines[make_key(sig, true)] = first;
+
 	if (reflection != nullptr) {
-		NS::Array *args = reflection->vertexBindings();
+		NS::Array *args = nullptr;
 		for (NS::UInteger stage = 0; stage < 2; stage++) {
 			args = (stage == 0) ? reflection->vertexBindings()
 			                    : reflection->fragmentBindings();
@@ -389,33 +488,16 @@ GLuint PSIGLShader::compile() {
 		}
 	}
 
-	// The same pipeline with blending switched off, for materials that do not
-	// need it. Everything else about the descriptor -- functions, vertex layout,
-	// pixel formats, sample count -- is identical, so this is one extra
-	// newRenderPipelineState per shader at load time and nothing at draw time.
-	//
-	// No reflection: the two share every binding, and the block was already
-	// resolved above.
-	color->setBlendingEnabled(false);
-	NS::Error *opaque_error = nullptr;
-	_pipeline_opaque = PSI_G::metal_ctx->device()->newRenderPipelineState(
-		pipeline_desc, &opaque_error);
-
-	if (_pipeline_opaque == nullptr) {
-		// Not fatal: use_program() falls back to the blended pipeline, which is
-		// what every object used before this existed.
-		const char *msg = "unknown error";
-		if (opaque_error != nullptr && opaque_error->localizedDescription() != nullptr) {
-			msg = opaque_error->localizedDescription()->utf8String();
-		}
-		psilog_err("Shader %s: opaque pipeline variant failed (%s); "
-		           "objects using it stay blended", get_info_str().c_str(), msg);
+	// The opaque variant for the same signature. One extra
+	// newRenderPipelineState at load, nothing at draw time.
+	MTL::RenderPipelineState *opaque = build_pipeline(sig, false, nullptr);
+	if (opaque != nullptr) {
+		_pipelines[make_key(sig, false)] = opaque;
 	}
 
-	vertex_desc->release();
-	pipeline_desc->release();
-
 	resolve_hot_uniforms();
+
+	_compiled = true;
 
 	psilog(PSILog::OPENGL, "Shader %s compiled (%s / %s), %zu uniforms, block %zu bytes",
 	       get_info_str().c_str(), vertex_fn_name.c_str(),
@@ -521,12 +603,16 @@ void PSIGLShader::use_program(bool blended) {
 		return;
 	}
 
-	if (_pipeline == nullptr) {
-		// This shader failed to build. Unbind rather than returning early:
-		// Metal keeps the last pipeline set on the encoder, so leaving it alone
-		// would draw this object through the PREVIOUS shader's pipeline, with a
-		// vertex layout that does not match its mesh. That renders garbage
-		// instead of simply omitting the object.
+	// The variant matching the pass being encoded, built on first use.
+	MTL::RenderPipelineState *pipeline =
+		pipeline_for(PSI_G::metal_ctx->pass_signature(), blended);
+
+	if (pipeline == nullptr) {
+		// This shader has no pipeline for this pass. Unbind rather than
+		// returning early: Metal keeps the last pipeline set on the encoder, so
+		// leaving it alone would draw this object through the PREVIOUS shader's
+		// pipeline, with a vertex layout that does not match its mesh. That
+		// renders garbage instead of simply omitting the object.
 		PSI_G::metal_ctx->set_current_shader(nullptr);
 
 		if (_warned_no_pipeline == false) {
@@ -537,8 +623,6 @@ void PSIGLShader::use_program(bool blended) {
 		return;
 	}
 
-	MTL::RenderPipelineState *pipeline =
-		(!blended && _pipeline_opaque != nullptr) ? _pipeline_opaque : _pipeline;
 	encoder->setRenderPipelineState(pipeline);
 
 	// Become the "bound program", so the draw call can flush our staged
