@@ -108,7 +108,7 @@ void PSIGLShader::warn_missing_uniform(const std::string &name) {
 	// set_uniform("u_diffuse", 0) to pick a texture unit. In Metal a texture is a
 	// separate argument bound by PSIGLTexture::bind(), so there is no block
 	// member by that name and nothing to do. Not an error.
-	if (_texture_names.count(name) > 0) {
+	if (_texture_slots.count(name) > 0) {
 		return;
 	}
 
@@ -420,6 +420,8 @@ GLuint PSIGLShader::compile() {
 	// only inside that call, so this is the one build that asks for it.
 	_uniforms.clear();
 	_uniform_members.clear();
+	_texture_slots.clear();
+	_sampler_slots.clear();
 	_fragment_has_uniforms = false;
 
 	const PSIMetal::pass_signature &sig = PSI_G::metal_ctx->pass_signature();
@@ -446,12 +448,24 @@ GLuint PSIGLShader::compile() {
 					continue;
 				}
 
-				// Record texture arguments so set_uniform("u_diffuse", 0) --
-				// which GLSL needed to pick a texture unit -- is recognised
-				// rather than reported as a missing uniform.
+				// Record texture and sampler arguments with the slot they
+				// were declared at. Two reasons: set_uniform("u_diffuse", 0)
+				// -- which GLSL needed to pick a texture unit -- is recognised
+				// rather than reported as a missing uniform, and a material can
+				// bind textures by name into whatever slots this particular
+				// shader used.
 				if (base->type() == MTL::BindingTypeTexture) {
 					if (base->name() != nullptr) {
-						_texture_names.insert(base->name()->utf8String());
+						_texture_slots[base->name()->utf8String()] =
+							(uint32_t)base->index();
+					}
+					continue;
+				}
+
+				if (base->type() == MTL::BindingTypeSampler) {
+					if (base->name() != nullptr) {
+						_sampler_slots[base->name()->utf8String()] =
+							(uint32_t)base->index();
 					}
 					continue;
 				}

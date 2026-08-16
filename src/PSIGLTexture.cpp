@@ -452,6 +452,29 @@ void PSIGLTexture::bind() {
 	}
 }
 
+void PSIGLTexture::bind(GLint texture_slot, GLint sampler_slot) {
+	if (PSI_G::metal_ctx == nullptr || _texture == nullptr) {
+		return;
+	}
+	if (texture_slot < 0) {
+		return;
+	}
+
+	MTL::RenderCommandEncoder *encoder = PSI_G::metal_ctx->encoder();
+	if (encoder == nullptr) {
+		return;
+	}
+
+	if (_sampler == nullptr) {
+		rebuild_sampler();
+	}
+
+	encoder->setFragmentTexture(_texture, (NS::UInteger)texture_slot);
+	if (_sampler != nullptr && sampler_slot >= 0) {
+		encoder->setFragmentSamplerState(_sampler, (NS::UInteger)sampler_slot);
+	}
+}
+
 void PSIGLTexture::unbind() {
 	// No global binding point to clear; the next draw sets what it needs.
 }

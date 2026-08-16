@@ -469,6 +469,8 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 	color->setLoadAction(load);
 	color->setClearColor(MTL::ClearColor::Make(clear.r, clear.g, clear.b, clear.a));
 
+	bool has_depth = false;
+
 	if (to_drawable) {
 		if (_msaa_texture != nullptr) {
 			color->setTexture(_msaa_texture);
@@ -481,6 +483,7 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 			update_pass_signature(_drawable->texture());
 		}
 
+		has_depth = (_depth_texture != nullptr);
 		if (_depth_texture != nullptr) {
 			MTL::RenderPassDepthAttachmentDescriptor *depth = desc->depthAttachment();
 			depth->setTexture(_depth_texture);
@@ -499,6 +502,7 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 		}
 
 		MTL::Texture *depth_texture = target->depth_attachment();
+		has_depth = (depth_texture != nullptr);
 		if (depth_texture != nullptr) {
 			MTL::RenderPassDepthAttachmentDescriptor *depth = desc->depthAttachment();
 			depth->setTexture(depth_texture);
@@ -552,8 +556,11 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 	set_pass_fill_mode(pass.get_fill_mode() == PSIRenderPass::FILL_LINES);
 
 	// Depth testing on by default, as PSIGLRenderer::init() did with
-	// glEnable(GL_DEPTH_TEST).
-	set_pass_depth_test(true);
+	// glEnable(GL_DEPTH_TEST) -- but only when the pass actually has somewhere
+	// to test against. A depth-stencil state that tests or writes depth with no
+	// depth attachment bound is a Metal validation error, and a full-screen
+	// pass into a DEPTH_NONE target is exactly that case.
+	set_pass_depth_test(has_depth);
 
 	// A new encoder starts with no pipeline bound, so nothing may draw until a
 	// shader binds one.

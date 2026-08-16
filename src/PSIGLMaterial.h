@@ -37,7 +37,7 @@ class PSIGLMaterial {
 				_lit(rhs._lit),
 				_textured(rhs._textured),
 				_blend_mode(rhs._blend_mode),
-				_texture(rhs._texture),
+				_textures(rhs._textures),
 				_shader(rhs._shader) {
 		}
 
@@ -89,12 +89,22 @@ class PSIGLMaterial {
 
 		// Bind every texture this material carries onto the active encoder.
 		//
-		// One slot for now; Phase 5 of the API work replaces this with a
-		// name -> texture map resolved against the shader's reflected binding
-		// indices, so a material can carry albedo plus normal plus roughness.
-		void bind_textures() const {
-			if (_texture != nullptr) {
-				_texture->bind();
+		// Each name is resolved against the shader's reflected binding indices,
+		// so a texture lands in the slot that shader declared it at. A name the
+		// shader does not declare resolves to -1 and is skipped, which is what
+		// lets one material serve a shader reading three maps and another
+		// reading one.
+		void bind_textures(const ShaderSharedPtr &shader) const {
+			if (shader == nullptr) {
+				return;
+			}
+
+			for (const auto &entry : _textures) {
+				const GLint slot = shader->get_texture_slot(entry.first);
+				if (slot < 0 || entry.second == nullptr) {
+					continue;
+				}
+				entry.second->bind(slot, shader->get_sampler_slot(entry.first));
 			}
 		}
 
@@ -108,20 +118,50 @@ class PSIGLMaterial {
 		const ShaderSharedPtr &shader_ref() const {
 			return _shader;
 		}
-		const GLTextureSharedPtr &texture_ref() const {
-			return _texture;
+		const std::unordered_map<std::string, GLTextureSharedPtr> &textures_ref() const {
+			return _textures;
 		}
 
-		// Should we have a clearTexture 
+		// The name a texture takes when none is given.
+		//
+		// Every shader in the tree calls its one texture u_diffuse, so an
+		// unnamed set_texture() means that one.
+		static constexpr const char *DEFAULT_TEXTURE = "u_diffuse";
+
+		// Should we have a clearTexture
 		void set_texture(GLTextureSharedPtr texture) {
-			_texture = texture;
-			_textured = true;
+			set_texture_named(DEFAULT_TEXTURE, texture);
 		}
 		GLTextureSharedPtr get_texture() {
-			return _texture;
+			return get_texture_named(DEFAULT_TEXTURE);
 		}
+
+		// Attach a texture under the name its shader declares it by.
+		//
+		// A material can carry as many as its shader reads -- albedo, normal,
+		// roughness -- and each is bound at the slot reflection reported for
+		// that name, rather than everything landing in slot 0 as it did when a
+		// material held exactly one texture.
+		//
+		// Naming rather than numbering means one material works with shaders
+		// that read different subsets: a name the shader does not declare is
+		// simply not bound.
+		void set_texture_named(std::string name, GLTextureSharedPtr texture) {
+			if (texture == nullptr) {
+				_textures.erase(name);
+			} else {
+				_textures[name] = texture;
+			}
+			_textured = !_textures.empty();
+		}
+
+		GLTextureSharedPtr get_texture_named(const std::string &name) {
+			auto it = _textures.find(name);
+			return (it == _textures.end()) ? nullptr : it->second;
+		}
+
 		bool has_texture() const {
-			return _texture != nullptr;
+			return !_textures.empty();
 		}
 
 		void set_textured(GLboolean textured) {
@@ -185,8 +225,9 @@ class PSIGLMaterial {
 		GLboolean _needs_update = false;
 		// Blending override; see set_blending().
 		GLint _blend_mode = BLEND_AUTO;
-		// Texture for this material.
-		GLTextureSharedPtr _texture;
+		// Textures by the name their shader declares them under; see
+		// set_texture_named(). Replaces the single _texture slot.
+		std::unordered_map<std::string, GLTextureSharedPtr> _textures;
 		// Shader that is used to render this material.
 		ShaderSharedPtr _shader;
 };

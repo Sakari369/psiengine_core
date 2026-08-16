@@ -261,16 +261,16 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	const auto &shader = get_shader_ref();
 	const auto &mesh = get_gl_mesh_ref();
 	const auto &material = get_render_asset().material;
-	const auto &texture = material->texture_ref();
+	const bool has_texture = material->has_texture();
 
 	// TODO: are these required ?
 	assert(shader != nullptr);
 	assert(mesh != nullptr);
 	assert(material	!= nullptr);
-	assert(texture != nullptr);
+	assert(has_texture);
 
 	shader->use_program();
-	texture->bind();
+	material->bind_textures(shader);
 
 	// Do we translate the text based on camera position ?
 	GLboolean is_translated = is_translated_by_camera();
@@ -283,7 +283,6 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 		calc_model_view_projection(ctx, get_render_asset().transform);
 
 		const PSIGLShader::hot_uniforms &hot = shader->hot();
-		shader->set_uniform("u_diffuse", 0);
 		shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
 		shader->set_uniform(hot.color, material->get_color());
 

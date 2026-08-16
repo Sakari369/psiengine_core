@@ -269,6 +269,30 @@ class PSIGLShader {
 			return !_pipelines.empty();
 		}
 
+		// Which slot does this shader bind the named texture at?
+		//
+		// -1 when the shader has no such texture, which a material treats as
+		// "this shader does not want that map" rather than as an error -- the
+		// same material can then be used with a shader that reads three maps
+		// and one that reads one.
+		GLint get_texture_slot(const std::string &name) const {
+			auto it = _texture_slots.find(name);
+			return (it == _texture_slots.end()) ? -1 : (GLint)it->second;
+		}
+
+		// The sampler that goes with it.
+		//
+		// Resolved by the "<texture>_sampler" convention every shader here
+		// follows, falling back to the texture's own slot index -- which is
+		// what the pairing was before samplers were reflected at all.
+		GLint get_sampler_slot(const std::string &texture_name) const {
+			auto it = _sampler_slots.find(texture_name + "_sampler");
+			if (it != _sampler_slots.end()) {
+				return (GLint)it->second;
+			}
+			return get_texture_slot(texture_name);
+		}
+
 		// Did compile() succeed?
 		//
 		// This exists because compile()'s return value cannot answer it. It
@@ -391,7 +415,17 @@ class PSIGLShader {
 		// Texture/sampler argument names reported by reflection. These were
 		// plain uniforms in GLSL but are separate arguments in Metal, so
 		// set_uniform() on them is a no-op rather than a missing uniform.
-		std::unordered_set<std::string> _texture_names;
+		// Texture and sampler argument name -> the [[texture(n)]] /
+		// [[sampler(n)]] slot reflection reported it at.
+		//
+		// These were plain uniforms in GLSL but are separate arguments in
+		// Metal, so set_uniform() on one is a no-op rather than a missing
+		// uniform. Keeping the index as well as the name is what lets a
+		// material name its textures -- "u_diffuse", "u_normal" -- and have the
+		// draw path bind each at the slot its own shader declared, instead of
+		// everything going to slot 0.
+		std::unordered_map<std::string, uint32_t> _texture_slots;
+		std::unordered_map<std::string, uint32_t> _sampler_slots;
 
 		// Names already reported as missing, so a per-frame set_uniform() call
 		// does not spam the log.

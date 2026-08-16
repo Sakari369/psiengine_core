@@ -96,7 +96,13 @@ class PSIGLTexture {
 	// OpenGL bound to a global slot that persisted until changed; Metal sets
 	// texture and sampler on the render encoder. Outside a frame (during asset
 	// loading, where the GL code also called bind()) this is a no-op.
+	//
+	// The no-argument form targets slot 0, which is what every shader used
+	// while a material could only carry one texture. The explicit form is what
+	// PSIGLMaterial uses to put each named texture in the slot its shader
+	// declared it at.
 	void bind();
+	void bind(GLint texture_slot, GLint sampler_slot);
 	void unbind();
 
 	void set_id(GLuint id) { _id = id; }

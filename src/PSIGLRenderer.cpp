@@ -487,7 +487,7 @@ void PSIGLRenderer::encode_fullscreen_pass(const RenderPassSharedPtr &pass,
 		return;
 	}
 
-	material->bind_textures();
+	material->bind_textures(shader);
 
 	// Elapsed time is the one uniform a post-processing shader is likely to
 	// want; the rest of the block is about objects, and there is no object.

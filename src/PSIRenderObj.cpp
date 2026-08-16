@@ -76,20 +76,12 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		material->set_needs_update(false);
 	}
 
-	// Setup texture.
-	const auto &texture = material->texture_ref();
-	if (texture != nullptr) {
-		// There is no glActiveTexture equivalent: PSIGLTexture::bind() sets the
-		// texture and its sampler on the encoder at slot 0 directly, matching
-		// [[texture(0)]] / [[sampler(0)]] in the shaders.
-		//
-		// The set_uniform("u_diffuse", 0) below picked the texture unit under
-		// OpenGL. It is kept because Metal reflection reports u_diffuse as a
-		// texture argument and the call is recognised as a no-op, so removing it
-		// would be a behaviour change for no gain.
-		shader->set_uniform("u_diffuse", 0);
-		texture->bind();
-	}
+	// Setup textures.
+	//
+	// There is no glActiveTexture equivalent: each texture goes onto the
+	// encoder at the slot its shader declared the matching name at, resolved
+	// from reflection. See PSIGLMaterial::bind_textures().
+	material->bind_textures(shader);
 
 	// Calculate mvp matrix for the shader.
 	//
@@ -137,9 +129,6 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		child->draw(ctx);
 	}
 
-	if (texture != nullptr) {
-		texture->unbind();
-	}
 	// Back to whatever the pass asked for -- not to a hardcoded default.
 	if (disable_depth_test == true && PSI_G::metal_ctx != nullptr) {
 		PSI_G::metal_ctx->restore_depth_test();
