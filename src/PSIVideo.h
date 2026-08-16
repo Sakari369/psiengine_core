@@ -93,6 +93,19 @@ class PSIVideo {
 			return _viewport;
 		}
 
+		// The size the GPU actually renders at, which is the viewport times the
+		// supersample factor -- 2 by default, see init().
+		//
+		// This, not get_viewport_size(), is what an offscreen render target
+		// standing in for the drawable must be created at. Sized from the
+		// viewport it comes out at half resolution and the pass that copies it
+		// back scales it up, which throws away both the supersampling and most
+		// of the benefit of multisampling underneath it.
+		glm::ivec2 get_render_size() const {
+			return (_metal_ctx != nullptr) ? _metal_ctx->get_render_size()
+			                               : get_viewport_size();
+		}
+
 		glm::ivec2 get_viewport_size() const {
 			return {_viewport.size.w, _viewport.size.h};
 		}
