@@ -93,7 +93,7 @@ class PSIVideo {
 			return _viewport;
 		}
 
-		// Ask for a different supersample factor than the default of 2.
+		// Ask for a different supersample factor than the default of 3.
 		//
 		// Safe after init -- the context re-runs its resize -- but it must
 		// happen before anything is sized from get_render_size(), so psi.boot
@@ -102,8 +102,8 @@ class PSIVideo {
 		// Refused when PSI_SUPERSAMPLE was set, so a capture or a benchmark can
 		// force the factor down and have that stick.
 		//
-		// Costs the square of the factor in fill rate: 4 is four times the
-		// pixels of 2, and the demos that ask for it should be ones where edge
+		// Costs the square of the factor in fill rate: 4 is nearly twice the
+		// pixels of 3, and the demos that ask for it should be ones where edge
 		// quality is the point.
 		void set_supersample(GLint factor) {
 			if (_metal_ctx == nullptr) {
@@ -118,7 +118,7 @@ class PSIVideo {
 		}
 
 		// The size the GPU actually renders at, which is the viewport times the
-		// supersample factor -- 2 by default, see init().
+		// supersample factor -- 3 by default, see init().
 		//
 		// This, not get_viewport_size(), is what an offscreen render target
 		// standing in for the drawable must be created at. Sized from the

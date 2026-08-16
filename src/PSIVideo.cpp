@@ -126,14 +126,29 @@ bool PSIVideo::init() {
 	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
 	// to get edges smoother than multisampling alone can manage.
 	//
-	// 4x, meaning sixteen times the pixels of the window. That is a lot of fill
-	// rate to spend, and it is spent because four MSAA samples is not many
-	// gradations to describe a shallow edge with -- prism_grid's grazing prism
-	// silhouettes are the worst case and they need it. The demos here are small
-	// scenes; the cost lands in the single-digit milliseconds.
+	// 3x, meaning nine times the pixels of the window. It was 4x, and the extra
+	// step turned out to be nearly all cost: at 1920x1080 the two are hard to
+	// tell apart on the highest-contrast edge in any of these scenes once the
+	// frame has been resolved down to what the display shows, because the eye is
+	// comparing sixteen samples against nine rather than four against one.
 	//
-	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request.
-	int supersample = 4;
+	// What it buys, measured on this machine (gpu ms, 4x then 3x):
+	//
+	//   merkaba     1.80 -> 1.09      starfield   1.70 -> 1.00
+	//   pong_game   1.20 -> 0.76      prism_grid  3.46 -> 2.30
+	//
+	// About a third off every scene. It matters most where it was hurting most:
+	// plasma_cube at 2560x1440 fullscreen goes 9.2 -> 6.5, which is the
+	// difference between fitting a 60 Hz budget and fitting a 120 Hz one.
+	//
+	// Still supersampled rather than MSAA alone, for the original reason: four
+	// MSAA samples is not many gradations to describe a shallow edge with, and
+	// prism_grid's grazing prism silhouettes are the worst case in the tree.
+	//
+	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request. Note
+	// tools/capture_all.sh pins 2, so the pixel-diff harness is unaffected by
+	// this default and its baselines stay comparable across the change.
+	int supersample = 3;
 	const char *ss_env = getenv("PSI_SUPERSAMPLE");
 	if (ss_env != nullptr) {
 		int parsed = atoi(ss_env);
