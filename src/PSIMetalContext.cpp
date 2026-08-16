@@ -79,6 +79,10 @@ void PSIMetalContext::shutdown() {
 		_depth_state_off->release();
 		_depth_state_off = nullptr;
 	}
+	if (_depth_state_read_only != nullptr) {
+		_depth_state_read_only->release();
+		_depth_state_read_only = nullptr;
+	}
 	if (_shader_library != nullptr) {
 		_shader_library->release();
 		_shader_library = nullptr;
@@ -174,9 +178,26 @@ bool PSIMetalContext::create_depth_states() {
 	desc->setDepthWriteEnabled(false);
 	_depth_state_off = _device->newDepthStencilState(desc);
 
+	// glDepthMask(GL_FALSE) with the test still on: what a transparent object
+	// needs, and what neither state above provides.
+	//
+	// A blended object must still be hidden by opaque geometry in front of it,
+	// so the test stays. But it must not write depth, because the blend result
+	// depends on draw order and a transparent fragment that writes depth
+	// rejects whatever is behind it -- which does not blend it, it deletes it.
+	// Inside one instanced draw that is unavoidable otherwise: the instances
+	// come off the buffer in a fixed order that has nothing to do with their
+	// distance, so with writes on, whichever instance happens to be drawn first
+	// punches a hole through the ones behind it.
+	desc->setDepthCompareFunction(MTL::CompareFunctionLess);
+	desc->setDepthWriteEnabled(false);
+	_depth_state_read_only = _device->newDepthStencilState(desc);
+
 	desc->release();
 
-	return _depth_state_on != nullptr && _depth_state_off != nullptr;
+	return _depth_state_on != nullptr
+	    && _depth_state_off != nullptr
+	    && _depth_state_read_only != nullptr;
 }
 
 void PSIMetalContext::set_depth_test_enabled(bool enabled) {
@@ -185,6 +206,24 @@ void PSIMetalContext::set_depth_test_enabled(bool enabled) {
 	}
 
 	MTL::DepthStencilState *state = enabled ? _depth_state_on : _depth_state_off;
+	if (state != nullptr) {
+		_encoder->setDepthStencilState(state);
+	}
+}
+
+void PSIMetalContext::set_depth_write_enabled(bool enabled) {
+	if (_encoder == nullptr) {
+		return;
+	}
+
+	// Only meaningful while the test is on. With the test off there is nothing
+	// to read and nothing is written either way, so the caller gets what it
+	// already had.
+	if (_pass_depth_test == false) {
+		return;
+	}
+
+	MTL::DepthStencilState *state = enabled ? _depth_state_on : _depth_state_read_only;
 	if (state != nullptr) {
 		_encoder->setDepthStencilState(state);
 	}

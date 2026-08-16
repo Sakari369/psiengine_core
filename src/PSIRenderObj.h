@@ -362,6 +362,17 @@ class PSIRenderObj {
 			_depth_tested = depth_tested;
 		}
 
+		// Whether this object writes depth. Independent of the test above: a
+		// blended object still wants to be hidden by opaque geometry in front of
+		// it, but must not stamp depth that rejects the fragments behind it
+		// before they can blend.
+		GLboolean is_depth_written() {
+			return _depth_written;
+		}
+		void set_depth_written(GLboolean depth_written) {
+			_depth_written = depth_written;
+		}
+
 		void set_scene_index(GLuint scene_index) {
 			_scene_index = scene_index;
 		}
@@ -404,6 +415,7 @@ class PSIRenderObj {
 
 		// Should this object be tested for depth ?
 		GLboolean _depth_tested = true;
+		GLboolean _depth_written = true;
 		// Should this object be translated with the camera ?
 		GLboolean _camera_translated = true;
 		// Is our object visible, should it be drawn ?

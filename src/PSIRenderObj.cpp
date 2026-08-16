@@ -40,6 +40,13 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		PSI_G::metal_ctx->set_depth_test_enabled(false);
 	}
 
+	// Should it write depth ? Blended objects test but do not write; see the
+	// note on the read-only depth state in PSIMetalContext.
+	GLboolean disable_depth_write = is_depth_tested() && !is_depth_written();
+	if (disable_depth_write == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->set_depth_write_enabled(false);
+	}
+
 	// Check if we should lock the object in place
 	// Used for example for SkyMesh and UI elements
 	GLboolean is_translated = is_translated_by_camera();
@@ -97,15 +104,26 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	// Set uniforms specific for this render object.
 	shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
 
+	// The unpremultiplied matrices, for every object rather than only instanced
+	// ones.
+	//
+	// Instanced shaders need them because the per-instance transform has to sit
+	// between this object's model matrix and the view, so a premultiplied MVP is
+	// no use to them. But any shader doing world-space work needs them too --
+	// reflections, for one, which need the fragment's world position and, from
+	// the view matrix, where the eye is. Without these an ordinary object can
+	// reach clip space and nothing else.
+	//
+	// They cost three matrix copies. PSIUniforms is one fixed 480-byte block
+	// containing these fields whether or not they are filled, and the whole
+	// block is pushed on every draw regardless, so this adds no bandwidth --
+	// only the memcpy into a buffer that was already going.
+	shader->set_uniform(hot.model_matrix, get_model_matrix());
+	shader->set_uniform(hot.view_matrix, ctx->view.top());
+	shader->set_uniform(hot.projection_matrix, ctx->projection.top());
+
 	const auto &gl_mesh = get_gl_mesh_ref();
 	if (gl_mesh != nullptr && gl_mesh->is_instanced()) {
-		// Instanced shaders build their own MVP, because the per-instance
-		// transform has to sit between this object's model matrix and the view.
-		// The pre-multiplied MVP above is no use to them.
-		shader->set_uniform(hot.model_matrix, get_model_matrix());
-		shader->set_uniform(hot.view_matrix, ctx->view.top());
-		shader->set_uniform(hot.projection_matrix, ctx->projection.top());
-
 		// Identity: the instanced vertex shader transforms the normal by the
 		// combined model matrix itself, so per-instance rotation affects
 		// lighting. That makes fragment_phong's `u_normal_matrix * f_normal` a
@@ -127,6 +145,9 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	}
 
 	// Back to whatever the pass asked for -- not to a hardcoded default.
+	if (disable_depth_write == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->restore_depth_test();
+	}
 	if (disable_depth_test == true && PSI_G::metal_ctx != nullptr) {
 		PSI_G::metal_ctx->restore_depth_test();
 	}

@@ -184,6 +184,11 @@ class PSIMetalContext {
 		// standing in for glEnable/glDisable(GL_DEPTH_TEST).
 		void set_depth_test_enabled(bool enabled);
 
+		// glDepthMask, with the test left alone. For blended objects, which have
+		// to be occluded by what is in front of them but must not occlude each
+		// other. A no-op while the pass has the depth test off.
+		void set_depth_write_enabled(bool enabled);
+
 		// Pass defaults, and how an object temporarily departs from them.
 		//
 		// A pass establishes a fill mode and a depth-test state when it opens;
@@ -357,6 +362,7 @@ class PSIMetalContext {
 		// depth-test-off variant used by skyboxes and UI elements.
 		MTL::DepthStencilState *_depth_state_on = nullptr;
 		MTL::DepthStencilState *_depth_state_off = nullptr;
+		MTL::DepthStencilState *_depth_state_read_only = nullptr;
 		bool create_depth_states();
 
 		// Non-owning: the shader whose pipeline is set on the encoder.
