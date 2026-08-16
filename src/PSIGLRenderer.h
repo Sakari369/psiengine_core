@@ -114,8 +114,16 @@ class PSIGLRenderer {
 			_sorting = sorting;
 		}
 
+		// Does nothing, and cannot.
+		//
+		// Kept because 19 scripts call it -- always as
+		// psi.renderer:set_msaa_samples(psi.video:get_msaa_samples()), which
+		// hands the renderer the value it already has. The sample count is
+		// baked into every render pipeline at compile time, so it has to be
+		// decided by PSIVideo before any shader is built; by the time a script
+		// runs, changing it would invalidate every pipeline.
 		void set_msaa_samples(GLint msaa_samples) {
-			_msaa_samples = msaa_samples;
+			(void)msaa_samples;
 		}
 
 		void set_cull_mode(GLint cull_mode) {
@@ -136,18 +144,6 @@ class PSIGLRenderer {
 
 		GLTextureSharedPtr get_offscreen_texture() {
 			return _offscreen_texture;
-		}
-
-		// Framebuffer objects do not exist in Metal -- a render pass names its
-		// attachments directly. These stay because they are bound to Lua
-		// (LuaAPI.cpp:542-543), but there is no handle to hand back; use
-		// get_offscreen_texture() instead. No shipped script calls either.
-		GLuint get_offscreen_fbo() {
-			return 0;
-		}
-
-		GLuint get_offscreen_depth_buffer() {
-			return 0;
 		}
 
 		// Store reference to the PSIVideo instance.
@@ -198,22 +194,17 @@ class PSIGLRenderer {
 		// Metal device, queue and swapchain. Owned by PSIVideo.
 		MetalContextSharedPtr _metal_ctx;
 
-		// Offscreen framebuffer we are rendering to.
-		GLuint _offscreen_fbo = -1;
-
 		// Offscreen texture we are rendering to.
+		//
+		// Superseded by PSIRenderTarget, which a pass names directly; this is
+		// the single target the old render()/flip() path still uses.
 		GLTextureSharedPtr _offscreen_texture;
-
-		// Offscreen depth buffer.
-		GLuint _offscreen_depth_buffer = -1;
 
 		// Draw mode sets wireframe and blending together.
 		GLint _draw_mode = DrawMode::SHADED;
 		// What face side are we culling, or none.
 		GLint _cull_mode = CullMode::BACK;
 
-		// Enable GL_BLEND ?
-		bool _blending_enabled = true;
 		// Render object as wireframe ?
 		bool _wireframe = false;
 		// Depth sort render objects ?
@@ -227,8 +218,6 @@ class PSIGLRenderer {
 		glm::vec4 _frustum_planes[6];
 		void extract_frustum_planes(const glm::mat4 &view_projection);
 		bool is_inside_frustum(PSIRenderObj *obj, const RenderContextSharedPtr &ctx) const;
-		// Current MSAA level.
-		GLfloat _msaa_samples = PSIVideo::DEF_MSAA_SAMPLES;
 		// Viewport size.
 		glm::ivec2 _viewport_size = glm::ivec2(0, 0);
 };

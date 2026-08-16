@@ -187,6 +187,26 @@ void PSIMetalContext::set_depth_test_enabled(bool enabled) {
 	}
 }
 
+void PSIMetalContext::set_pass_depth_test(bool enabled) {
+	_pass_depth_test = enabled;
+	set_depth_test_enabled(enabled);
+}
+
+void PSIMetalContext::set_fill_mode(bool lines) {
+	if (_encoder == nullptr) {
+		return;
+	}
+
+	_encoder->setTriangleFillMode(lines
+		? MTL::TriangleFillModeLines
+		: MTL::TriangleFillModeFill);
+}
+
+void PSIMetalContext::set_pass_fill_mode(bool lines) {
+	_pass_fill_lines = lines;
+	set_fill_mode(lines);
+}
+
 void PSIMetalContext::set_msaa_samples(int samples) {
 	if (_device == nullptr) {
 		return;
@@ -500,13 +520,13 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 		break;
 	}
 
-	_encoder->setTriangleFillMode(pass.get_fill_mode() == PSIRenderPass::FILL_LINES
-		? MTL::TriangleFillModeLines
-		: MTL::TriangleFillModeFill);
+	// Recorded as the pass default, so an object that draws itself as
+	// wireframe restores to this rather than to solid.
+	set_pass_fill_mode(pass.get_fill_mode() == PSIRenderPass::FILL_LINES);
 
 	// Depth testing on by default, as PSIGLRenderer::init() did with
 	// glEnable(GL_DEPTH_TEST).
-	set_depth_test_enabled(true);
+	set_pass_depth_test(true);
 
 	// A new encoder starts with no pipeline bound, so nothing may draw until a
 	// shader binds one.
@@ -597,7 +617,10 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	// Depth testing on by default, as PSIGLRenderer::init() did with
 	// glEnable(GL_DEPTH_TEST). Metal's default would be always-pass with depth
 	// writes off, which renders in draw order instead of depth order.
-	set_depth_test_enabled(true);
+	//
+	// The fill default is established by PSIGLRenderer::render() on this path,
+	// because it is a renderer-wide flag there rather than a pass property.
+	set_pass_depth_test(true);
 
 	// A new encoder starts with no pipeline bound, so nothing may draw until a
 	// shader binds one.
@@ -726,7 +749,7 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_offscreen_frame(MTL::Texture *
 		static_cast<double>(size.x), static_cast<double>(size.y),
 		0.0, 1.0
 	});
-	set_depth_test_enabled(true);
+	set_pass_depth_test(true);
 	_current_shader = nullptr;
 
 	return _encoder;

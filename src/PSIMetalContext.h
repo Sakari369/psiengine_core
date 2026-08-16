@@ -184,6 +184,24 @@ class PSIMetalContext {
 		// standing in for glEnable/glDisable(GL_DEPTH_TEST).
 		void set_depth_test_enabled(bool enabled);
 
+		// Pass defaults, and how an object temporarily departs from them.
+		//
+		// A pass establishes a fill mode and a depth-test state when it opens;
+		// individual objects override them and then have to put them back. They
+		// used to put them back to a hardcoded "solid" and "depth on", which is
+		// wrong the moment the pass wanted anything else -- turning on global
+		// wireframe in a scene that also contained one wireframe *material*
+		// silently rendered every object after it solid, because that object's
+		// restore reset the encoder rather than returning it to the pass.
+		//
+		// set_pass_* records the default and applies it; restore_* returns to it.
+		void set_pass_fill_mode(bool lines);
+		void set_fill_mode(bool lines);
+		void restore_fill_mode() { set_fill_mode(_pass_fill_lines); }
+
+		void set_pass_depth_test(bool enabled);
+		void restore_depth_test() { set_depth_test_enabled(_pass_depth_test); }
+
 		// The shader whose pipeline is currently set on the encoder, i.e. the
 		// equivalent of OpenGL's bound program.
 		//
@@ -307,6 +325,11 @@ class PSIMetalContext {
 
 		// Signature of the pass currently open; see pass_signature().
 		PSIMetal::pass_signature _pass_signature;
+
+		// State the current pass established, that per-object overrides restore
+		// to. See set_pass_fill_mode().
+		bool _pass_fill_lines = false;
+		bool _pass_depth_test = true;
 		// Recompute it from the current targets. Called as each pass opens.
 		void update_pass_signature(MTL::Texture *color_target);
 

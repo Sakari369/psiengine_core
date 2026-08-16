@@ -38,12 +38,6 @@ class PSIRenderContext {
 		// Current global rendering opacity.
 		GLfloat opacity = 1.0f;
 
-		// Force wireframe drawing ?
-		GLboolean wireframe = false;
-		// OpenGL Framebuffer objects we are using.
-		GLuint main_fbo = 0;
-		GLuint msaa_fbo = 0;
-
 		// Background color.
 		glm::vec4 bg_color = glm::vec4(0.2f, 0.2f, 0.2, 1.0f);
 

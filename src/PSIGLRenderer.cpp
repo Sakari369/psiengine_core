@@ -370,11 +370,12 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 	}
 
 	// Wireframe. Direct equivalent of glPolygonMode(GL_FRONT_AND_BACK, GL_LINE).
-	if (_wireframe) {
-		encoder->setTriangleFillMode(MTL::TriangleFillModeLines);
-	} else {
-		encoder->setTriangleFillMode(MTL::TriangleFillModeFill);
-	}
+	//
+	// Recorded as the pass default: an object drawn from a wireframe material
+	// restores to this, not to solid. Restoring to solid is what made global
+	// wireframe switch itself off for the rest of the frame after the first
+	// such object.
+	_metal_ctx->set_pass_fill_mode(_wireframe);
 
 	// Blending is part of the pipeline state now, set once per shader in
 	// PSIGLShader::compile() with the same SRC_ALPHA / ONE_MINUS_SRC_ALPHA
@@ -506,13 +507,10 @@ GLint PSIGLRenderer::set_draw_mode(GLint draw_mode) {
 	_draw_mode = draw_mode;
 	if (_draw_mode == DrawMode::SHADED ){
 		_wireframe = false;
-		_blending_enabled = true;
 	} else if (_draw_mode == DrawMode::WIREFRAME ) {
 		_wireframe = true;
-		_blending_enabled = false;
 	} else if (_draw_mode == DrawMode::WIREFRAME_BLENDED ) {
 		_wireframe = true;
-		_blending_enabled = true;
 	}
 	
 	return _draw_mode;

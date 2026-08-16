@@ -28,9 +28,13 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		(PSI_G::metal_ctx != nullptr) ? PSI_G::metal_ctx->encoder() : nullptr;
 
 	// Are we rendering as wireframe ?
-	bool wireframe = (material->get_wireframe() == true) || ctx->wireframe;
-	if (wireframe == true && encoder != nullptr) {
-		encoder->setTriangleFillMode(MTL::TriangleFillModeLines);
+	//
+	// ctx->wireframe used to be ORed in here. It was never bound to Lua and
+	// never written from C++, so it was always false; the reachable controls
+	// are this material flag and the pass's own fill mode.
+	bool wireframe = (material->get_wireframe() == true);
+	if (wireframe == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->set_fill_mode(true);
 	}
 
 	// Should this object be depth tested ?
@@ -136,13 +140,12 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	if (texture != nullptr) {
 		texture->unbind();
 	}
-	// Enable depth test back.
+	// Back to whatever the pass asked for -- not to a hardcoded default.
 	if (disable_depth_test == true && PSI_G::metal_ctx != nullptr) {
-		PSI_G::metal_ctx->set_depth_test_enabled(true);
+		PSI_G::metal_ctx->restore_depth_test();
 	}
-	// Enable solid rendering.
-	if (wireframe == true && encoder != nullptr) {
-		encoder->setTriangleFillMode(MTL::TriangleFillModeFill);
+	if (wireframe == true && PSI_G::metal_ctx != nullptr) {
+		PSI_G::metal_ctx->restore_fill_mode();
 	}
 	if (is_translated == false) {
 		ctx->view.pop();
