@@ -239,6 +239,40 @@ class PSIVideo {
 			return _mouse_capture_wanted && _window_focused;
 		}
 
+		// Release the pointer, or take it back. Bound to F1 in psi/keyb.lua.
+		//
+		// Without this there is no way out of a captured pointer at all: the
+		// demos hide the cursor at startup, GLFW_CURSOR_DISABLED locks it to the
+		// content area, and the title bar is then unreachable -- so the window
+		// cannot be moved, resized, or dragged to another display for the rest
+		// of the run.
+		//
+		// Releasing also shows the pointer, which the scripts read through
+		// is_cursor_visible() to decide whether mouse-look applies, so the
+		// camera stops turning while the pointer is free. That is the same
+		// coupling set_cursor_visible() has, in the other direction.
+		void toggle_mouse_capture() {
+			set_cursor_visible(!_cursor_visible);
+		}
+
+		// Called from the GLFW window-position callback.
+		//
+		// A window cannot be dragged while its pointer is captured -- macOS keeps
+		// warping the pointer back into the content area, and each warp moves the
+		// drag anchor, so the window walks across the screen in jumps instead of
+		// following the pointer. If the window moved at all while captured,
+		// something outside our control is moving it; get out of the way.
+		void set_window_moved() {
+			if (_mouse_capture_wanted == false) {
+				return;
+			}
+
+			set_cursor_visible(true);
+			psilog(PSILog::VIDEO,
+			       "Window moved while the pointer was captured; released it. "
+			       "F1 takes it back.");
+		}
+
 		// Called from the GLFW focus callback. Releases the pointer when another
 		// application takes focus and restores capture on return.
 		void set_window_focus(GLint focused) {
