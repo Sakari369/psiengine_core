@@ -178,6 +178,11 @@ class PSIGLRenderer {
 		// Current drawing context. Contains all the context variables that we need to pass around while rendering.
 		RenderContextSharedPtr _ctx;
 
+		// The last scene's camera matrices, for the full-screen passes that follow
+		// it. See the note in encode_fullscreen_pass().
+		glm::mat4 _last_view = glm::mat4(1.0f);
+		glm::mat4 _last_projection = glm::mat4(1.0f);
+
 		// The frame handle handed to scripts. Created once in init().
 		FrameSharedPtr _frame;
 

@@ -422,6 +422,18 @@ void PSIGLRenderer::draw_scene_in_pass(const RenderSceneSharedPtr &scene,
 				// Draw render objects in the scene.
 				draw_render_objs(scene, ctx, camera);
 			}
+
+			// Kept for the full-screen passes that follow this one.
+			//
+			// The stack is the right structure while a scene is drawing --
+			// objects push and pop it -- but it is unwound again by the time
+			// the pop below returns, and what is left at the base is the
+			// identity pushed at init. A post-process reading ctx->view.top()
+			// therefore gets an identity view and reconstructs every ray as if
+			// the camera were at the origin looking down -Z, which is a silent
+			// wrong answer rather than a missing one.
+			_last_view = ctx->view.top();
+			_last_projection = ctx->projection.top();
 		ctx->view.pop();
 	ctx->projection.pop();
 }
@@ -489,10 +501,29 @@ void PSIGLRenderer::encode_fullscreen_pass(const RenderPassSharedPtr &pass,
 
 	material->bind_textures(shader);
 
-	// Elapsed time is the one uniform a post-processing shader is likely to
-	// want; the rest of the block is about objects, and there is no object.
+	// Elapsed time is the one uniform every post-processing shader wants; the
+	// object half of the block has no object to describe here.
 	shader->set_uniform(shader->hot().elapsed_time, _ctx->elapsed_time);
 	shader->set_uniform(shader->hot().color, material->get_color());
+
+	// The view and projection matrices as well, for the effects that are not
+	// purely two-dimensional.
+	//
+	// A post-process that has to reason about the world -- volumetrics, fog,
+	// anything reconstructing a ray per pixel -- needs to know where the eye was
+	// and how it projected. Neither can be derived from a full-screen triangle,
+	// and without them such a shader can only work in screen space.
+	//
+	// These are the matrices of the last scene rendered, not the context's
+	// current ones: the context stack is unwound when render() returns, leaving
+	// the identity pushed at init. A full-screen pass has no camera of its own
+	// and inherits whichever one last drew, which is the natural reading -- a
+	// post-process operates on what was just rendered -- but it does mean an
+	// encode_fullscreen() before any encode() in the frame sees whatever the
+	// previous frame left. Effects needing these must follow their scene.
+	shader->set_uniform(shader->hot().view_matrix, _last_view);
+	shader->set_uniform(shader->hot().projection_matrix, _last_projection);
+
 	shader->bind_uniforms();
 
 	// Three vertices, no vertex buffers and no index buffer: the vertex shader
