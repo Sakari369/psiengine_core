@@ -21,6 +21,7 @@
 #include "PSIQuadGeometry.h"
 #include "PSIIcosahedronGeometry.h"
 #include "PSITetrahedronGeometry.h"
+#include "PSIOctahedronGeometry.h"
 #include "PSIPrismGeometry.h"
 
 namespace PSIGeometry {
@@ -33,6 +34,7 @@ namespace PSIGeometry {
 	GeometryDataSharedPtr cuboid(GLfloat width, GLfloat height, GLfloat depth);
 	GeometryDataSharedPtr plane(GLint rows, GLboolean repeat_texture);
 	GeometryDataSharedPtr icosahedron(GLint recursion);
+	GeometryDataSharedPtr octahedron();
 
 	std::array<glm::vec3, 4> quad(glm::vec2 origin, glm::vec2 radius);
 	std::vector<glm::vec3> create_poly(GLint num_points, GLfloat angle_offset, GLfloat radius);

@@ -171,6 +171,13 @@ GeometryDataSharedPtr icosahedron(GLint recursion) {
 	return geom;
 }
 
+GeometryDataSharedPtr octahedron() {
+	GeometryDataSharedPtr geom = PSIGeometry::Octahedron::octahedron();
+	add_buffer_defaults(geom);
+
+	return geom;
+}
+
 // Generate a circular polygon with numPoints and radius
 std::vector<glm::vec3> create_poly(GLint num_points, GLfloat angle_offset, GLfloat radius) {
 	GLfloat angle_inc = TWO_PI / num_points;

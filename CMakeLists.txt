@@ -78,8 +78,9 @@ set(SOURCES
 	src/PSIGeometryData.cpp 
 	src/PSIRenderScene.cpp 
 	src/PSICubeGeometry.cpp 
-	src/PSITetrahedronGeometry.cpp 
-	src/PSICuboidGeometry.cpp 
+	src/PSITetrahedronGeometry.cpp
+	src/PSIOctahedronGeometry.cpp
+	src/PSICuboidGeometry.cpp
 	src/PSIPlaneGeometry.cpp 
 	src/PSITextRenderer.cpp
 	src/PSITimeDisplay.cpp
@@ -118,8 +119,9 @@ set(HEADER_FILES
 	src/PSIIcosahedronGeometry.h 
 	src/PSIGeometryData.h 
 	src/PSIRenderScene.h 
-	src/PSICubeGeometry.h 
-	src/PSICuboidGeometry.h 
+	src/PSICubeGeometry.h
+	src/PSIOctahedronGeometry.h
+	src/PSICuboidGeometry.h
 	src/PSIPlaneGeometry.h 
 	src/PSILight.h
 	src/PSITextRenderer.h
