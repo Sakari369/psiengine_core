@@ -210,7 +210,7 @@ class PSIGLShader {
 		GLuint add_uniforms();
 		// Transform feedback has no Metal equivalent; recorded for the Poly
 		// compute-based reimplementation.
-		void add_transform_feedback_varyings(std::vector<std::string> varyings, GLboolean interleaved);
+		void add_transform_feedback_varyings(std::vector<std::string> varyings);
 
 		// Select the metallib entry point for this stage from a GLSL file name.
 		bool add_from_file(ShaderType type, std::string shader_path);

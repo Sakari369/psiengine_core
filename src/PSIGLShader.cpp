@@ -721,10 +721,11 @@ GLuint PSIGLShader::add_uniforms() {
 	return static_cast<GLuint>(_uniform_members.size());
 }
 
-void PSIGLShader::add_transform_feedback_varyings(std::vector<std::string> varyings,
-                                                  GLboolean interleaved) {
-	(void)interleaved;
-
+// The GL version took an `interleaved` flag as well. It was already unused --
+// (void)-cast on the line below this comment -- and neither call site ever
+// passed it, so Lua was handing the binding one argument for a two-argument
+// signature and LuaIntf was filling in a default.
+void PSIGLShader::add_transform_feedback_varyings(std::vector<std::string> varyings) {
 	// Metal has no transform feedback. Poly's capture path is reimplemented with
 	// a compute kernel writing to a buffer; until then, report rather than
 	// silently doing nothing, since the caller believes it captured something.

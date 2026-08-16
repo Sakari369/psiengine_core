@@ -28,10 +28,19 @@ class PSIAudio {
 		bool _playing = false;
 		// Has an audio file been loaded ?
 		bool _file_loaded = false;
+		// Has the context been initialized, and the device started? These gate
+		// the matching uninit calls in stop(), which used to run unconditionally
+		// on whatever happened to be in the structs.
+		bool _context_ready = false;
+		bool _device_ready = false;
 
 	public:
 		PSIAudio() = default;
-		~PSIAudio() = default;
+		// Releases anything the script did not. An audio thread still running at
+		// process exit is the same hang as one still running at stop().
+		~PSIAudio() {
+			stop();
+		}
 
 		// Should playback loop ?
 		static bool m_loop;
@@ -50,8 +59,8 @@ class PSIAudio {
 			_selected_device_index = selected_device_index;
 		}
 
-		void set_playing(bool playing) {
-			_playing = playing;
+		bool is_playing() const {
+			return _playing;
 		}
 
 		void set_loop(bool loop) {

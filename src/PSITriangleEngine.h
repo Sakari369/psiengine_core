@@ -14,7 +14,6 @@
 #include "PSIAABB.h"
 #include "PSICamera.h"
 
-#include "PSIResourceManager.h"
 #include "PSIFileUtils.h"
 
 #include "PSIRenderScene.h"
@@ -27,7 +26,6 @@
 #include "PSICuboidGeometry.h"
 //#include "PSISphereGeometry.h"
 
-#include "PSICycler.h"
 #include "PSIScaler.h"
 
 #include "PSIFrameTimer.h"

@@ -59,7 +59,6 @@ set(SOURCES
 	src/PSIMath.cpp 
 	src/PSIVideo.cpp 
 	src/PSIGeometry.cpp 
-	src/PSIResourceManager.cpp 
 	src/PSIGLUtils.cpp 
 	src/PSIGLShader.cpp 
 	src/PSIGLTransform.cpp 
@@ -68,7 +67,6 @@ set(SOURCES
 	src/PSIRenderObj.cpp 
 	src/PSIRenderMesh.cpp
 	src/PSIFrameTimer.cpp
-	src/PSICycler.cpp 
 	src/PSIScaler.cpp 
 	src/PSIColor.cpp 
 	src/PSIString.cpp 
@@ -99,7 +97,6 @@ set(HEADER_FILES
 	src/PSIMath.h 
 	src/PSIVideo.h 
 	src/PSIGeometry.h 
-	src/PSIResourceManager.h 
 	src/PSIGLUtils.h 
 	src/PSIGLShader.h 
 	src/PSIGLTransform.h 
@@ -111,7 +108,6 @@ set(HEADER_FILES
 	src/PSIRenderMesh.h
 	src/PSIRenderContext.h
 	src/PSIFrameTimer.h
-	src/PSICycler.h 
 	src/PSIScaler.h 
 	src/PSIColor.h 
 	src/PSIString.h 
