@@ -30,7 +30,7 @@ enum BufferIndex {
 
 	BUFFER_UNIFORMS_VERTEX   = 16,
 	BUFFER_UNIFORMS_FRAGMENT = 17,
-	// Per-instance data for the geometry-shader replacement paths (Poly, points).
+	// Per-instance data for the geometry-shader replacement paths.
 	BUFFER_INSTANCE_DATA     = 18,
 };
 

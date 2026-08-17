@@ -14,7 +14,7 @@
 //
 // These names were previously supplied by <GL/glew.h>. They are used as the
 // engine's general scalar vocabulary in ~81 files, including many that never
-// touched OpenGL (PSICamera, PSILight, PSIScaler, PolyConfig, ...), and in every
+// touched OpenGL (PSICamera, PSILight, PSIScaler, ...), and in every
 // LUA_ARGS() declaration in LuaAPI.cpp. Defining them here keeps the Metal port
 // from turning into an 81-file rename in the same commit.
 //

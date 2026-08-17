@@ -221,9 +221,9 @@ GLuint PSIGLMesh::get_buffer_id(GLuint buffer_name_id) {
 // Push the bound shader's staged uniform block before drawing.
 //
 // This lives at the draw call rather than in one caller because the draw paths
-// are spread across PSIRenderObj::draw_mesh(), PSITextRenderer::draw() and
-// Poly -- and under OpenGL every one of them got uniform updates applied
-// immediately, with no flush step to forget.
+// are spread across PSIRenderObj::draw_mesh() and PSITextRenderer::draw() --
+// and under OpenGL both of them got uniform updates applied immediately, with
+// no flush step to forget.
 void PSIGLMesh::flush_current_uniforms() {
 	if (PSI_G::metal_ctx == nullptr) {
 		return;

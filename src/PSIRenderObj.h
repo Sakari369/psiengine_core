@@ -412,9 +412,9 @@ class PSIRenderObj {
 		// Compute this frame's matrices, keeping last frame's for the velocity
 		// pass.
 		//
-		// Subclasses that override draw() -- PSITextRenderer, Poly -- must call
-		// this rather than calc_model_view_projection() directly, or their
-		// objects report motion from whatever _prev_mvp happened to hold.
+		// Subclasses that override draw() -- PSITextRenderer -- must call this
+		// rather than calc_model_view_projection() directly, or their objects
+		// report motion from whatever _prev_mvp happened to hold.
 		void calc_mvp_with_history(const RenderContextSharedPtr &ctx,
 		                           PSIGLTransform &transform);
 

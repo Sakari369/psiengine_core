@@ -30,7 +30,7 @@
 // A GEOMETRY stage is accepted and recorded but never compiled -- Metal has no
 // geometry shaders. Those shaders are reimplemented as instanced vertex shaders,
 // so requesting one selects the "_instanced" vertex variant instead of failing,
-// which keeps poly scripts loading.
+// which keeps normal_vis loading.
 
 #pragma once
 
@@ -223,9 +223,6 @@ class PSIGLShader {
 		GLuint add_uniform(std::string name);
 		// Reflect the pipeline's uniform block. Returns the uniform count.
 		GLuint add_uniforms();
-		// Transform feedback has no Metal equivalent; recorded for the Poly
-		// compute-based reimplementation.
-		void add_transform_feedback_varyings(std::vector<std::string> varyings);
 
 		// Select the metallib entry point for this stage from a GLSL file name.
 		bool add_from_file(ShaderType type, std::string shader_path);
@@ -302,10 +299,9 @@ class PSIGLShader {
 
 		// Does this shader have a pipeline bound draws can go through?
 		//
-		// Not the same question as "did compile() succeed" -- a capture-only
-		// program (polyform: a vertex stage and no fragment stage) compiles
-		// successfully and deliberately has no pipeline. Use is_compiled() to
-		// test for failure.
+		// Not quite the same question as "did compile() succeed": a failed
+		// compile leaves no pipeline either. Use is_compiled() to test for
+		// failure, and this to test whether a draw can proceed.
 		bool is_valid() const {
 			return !_pipelines.empty();
 		}

@@ -284,7 +284,7 @@ bool PSIGLShader::add_from_file(ShaderType type, std::string shader_path) {
 		// Metal has no geometry shaders. These are reimplemented as instanced
 		// vertex shaders, so record the request and let compile() pick the
 		// "_instanced" vertex variant instead of failing -- scripts like
-		// poly_with_axis.lua and normal_vis.lua must keep loading.
+		// normal_vis.lua must keep loading.
 		_has_geometry_stage = true;
 		psilog(PSILog::OPENGL,
 		       "Geometry stage \"%s\" requested; using instanced vertex path",
@@ -495,27 +495,6 @@ GLuint PSIGLShader::compile() {
 
 	create_program();
 
-	// A program with no fragment stage was a transform-feedback capture program:
-	// polyform.vert + polyform.geom amplified a point into a ring and the result
-	// was captured to a buffer with the rasterizer discarded (see
-	// poly_with_axis.lua:123-135).
-	//
-	// Metal has neither transform feedback nor geometry shaders, and the ring is
-	// now generated directly in vertex_feedback, so there is nothing for this
-	// program to do. Report it and succeed rather than failing -- the scripts
-	// still create it, set it as the line material's shader, and call
-	// add_uniforms() on it.
-	if (_fragment_base.empty()) {
-		psilog(PSILog::OPENGL,
-		       "Shader %s: capture-only program (no fragment stage); "
-		       "geometry is generated in the render pass instead",
-		       get_info_str().c_str());
-		// Compiled, deliberately without a pipeline -- is_valid() stays false
-		// for this one and that is correct.
-		_compiled = true;
-		return _program;
-	}
-
 	// The "_instanced" suffix marks a vertex entry point driven by
 	// instance_id/vertex_id rather than one draw per object. Two things ask for
 	// it, and they are disjoint in practice:
@@ -723,22 +702,6 @@ GLuint PSIGLShader::add_uniforms() {
 	return static_cast<GLuint>(_uniform_members.size());
 }
 
-// The GL version took an `interleaved` flag as well. It was already unused --
-// (void)-cast on the line below this comment -- and neither call site ever
-// passed it, so Lua was handing the binding one argument for a two-argument
-// signature and LuaIntf was filling in a default.
-void PSIGLShader::add_transform_feedback_varyings(std::vector<std::string> varyings) {
-	// Metal has no transform feedback. Poly's capture path is reimplemented with
-	// a compute kernel writing to a buffer; until then, report rather than
-	// silently doing nothing, since the caller believes it captured something.
-	std::string names;
-	for (const auto &v : varyings) {
-		names += v + " ";
-	}
-	psilog_err("Shader %s: transform feedback varyings (%s) not supported on Metal yet",
-	           get_info_str().c_str(), names.c_str());
-}
-
 void PSIGLShader::use_program(bool blended) {
 	if (PSI_G::metal_ctx == nullptr) {
 		return;
@@ -821,8 +784,8 @@ void PSIGLShader::set_uniform(GLuint location, const GLint &val) {
 		return;
 	}
 
-	// Poly.cpp:148 sets u_num_points as an int although the shader declares it
-	// float. GL silently rejected the mismatch; convert instead.
+	// A caller may hand an int for a uniform the shader declares float. GL
+	// silently rejected the mismatch; convert instead.
 	if (_uniform_members[location].data_type == MTL::DataTypeFloat) {
 		GLfloat f = static_cast<GLfloat>(val);
 		write_uniform(location, &f, sizeof(f));
