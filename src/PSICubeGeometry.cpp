@@ -39,7 +39,7 @@ namespace PSIGeometry {
 		// Frontfacing are counterclockwise wound.
 		// Backfacing are clockwise wound.
 		//
-		// Counter clockwise winding
+		// Counterclockwise winding
 		// 0    3
 		// o----o
 		// |    |

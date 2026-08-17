@@ -2,26 +2,6 @@
 
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
-// 4, which is what the device caps at for BGRA8 anyway -- asking for 8 only ever
-// meant "as much as you have".
-//
-// This was 2, on the reasoning that tile memory is the constraint: with the
-// depth and MSAA colour targets memoryless, 4x MSAA needs 4 bytes of colour plus
-// 4 of depth per sample, 32 bytes per pixel, which is the whole 32 KB budget for
-// a 32x32 tile and forces the driver to use smaller tiles.
-//
-// That is still true and it turns out not to cost anything here, because the
-// supersample factor came down at the same time and the tiles are covering a
-// quarter as many rendered pixels. Measured fullscreen at 2560x1440, gpu ms,
-// 2x MSAA then 4x:
-//
-//   plasma_cube  4.93 -> 4.98      prism_grid  2.06 -> 1.91
-//
-// Free on one and slightly faster on the other. Do not carry this over to a
-// higher supersample factor without measuring again -- at 3x it was a real cost,
-// which is where the old default came from.
-//
-// -a/--antialias still overrides this.
 const GLint PSIVideo::DEF_MSAA_SAMPLES = 4;
 
 PSIVideo::~PSIVideo() {
@@ -131,33 +111,6 @@ bool PSIVideo::init() {
 	// Report back what the device actually supported.
 	_msaa_samples = _metal_ctx->get_msaa_samples();
 
-	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
-	// to get edges smoother than multisampling alone can manage.
-	//
-	// 1: no supersampling at all, because temporal antialiasing replaced it.
-	//
-	// This was 3, then 2. Supersampling answers aliasing by rendering more
-	// pixels than the display has and averaging them, which costs N^2 fill for
-	// N^2 samples and is the whole reason fullscreen was slow. TAA takes one
-	// sample per pixel per frame at a different sub-pixel offset each time and
-	// averages across frames instead, so a still image converges on far more
-	// samples than 2x ever gave for the cost of one extra texture read.
-	//
-	// Measured on plasma_cube frame 90, as high-frequency energy against a 2x
-	// supersampled render of the same frame (0.0500):
-	//
-	//   2x supersampled, no TAA   0.0500  (the reference)
-	//   TAA at 1x, no sharpen     0.0363  (73%)
-	//   TAA at 1x, sharpen 0.5    0.0523  (105%)
-	//
-	// So with the sharpen it carries as much detail as the thing it replaces.
-	// Fullscreen gpu cost over the same change: plasma_cube 5.05 -> 2.6 ms,
-	// merkaba 0.93 -> 0.6.
-	//
-	// MSAA stays at 4 and is doing something different: it is coverage within a
-	// single frame, which is what keeps a thin edge from flickering in and out
-	// between jitter offsets before the history has anything to average.
-	//
 	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request. Note
 	// that raising it with TAA on is not free the way it was: the temporal pass
 	// runs at the display's size either way, so the extra pixels are spent
@@ -346,7 +299,7 @@ void PSIVideo::print_video_state() {
 	}
 
 	// What the hardware MSAA supports
-	say("[video] hardware supports %dx MSAA\n", msaa);
+	say("[video] msaa       %dx MSAA\n", msaa);
 
 	// This is the startup default. A script asking for EDR or colour management
 	// does it from psi.boot, which runs after this, and
