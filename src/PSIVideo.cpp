@@ -345,21 +345,9 @@ void PSIVideo::print_video_state() {
 		    supersample > 1 ? ", supersampling only" : ", MSAA only");
 	}
 
-	// On its own line, and qualified, because the unqualified version was a lie
-	// for a third of the scripts here.
-	//
-	// This count applies to passes that draw to the drawable. A pass aimed at a
-	// PSIRenderTarget takes the sample count that target was built with, and
-	// psi.render_target defaults it to 1 -- so a script that renders its scene
-	// offscreen and composites gets no multisampling at all unless it asks. The
-	// startup line claimed 4x MSAA on plasma_cube for a scene where captures at
-	// 1x, 2x and 4x came out byte-identical.
-	say("[video] msaa       %dx on passes drawing to the drawable; "
-	    "a render target carries its own\n", msaa);
+	// What the hardware MSAA supports
+	say("[video] hardware supports %dx MSAA\n", msaa);
 
-	// How the numbers the shaders write are meant to be read, and what the
-	// display can currently do with them.
-	//
 	// This is the startup default. A script asking for EDR or colour management
 	// does it from psi.boot, which runs after this, and
 	// PSIMetalContext::apply_output_mode() prints a matching line when it does.
