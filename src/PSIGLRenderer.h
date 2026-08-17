@@ -179,6 +179,23 @@ class PSIGLRenderer {
 		RenderContextSharedPtr _ctx;
 
 		// The last scene's camera matrices, for the full-screen passes that follow
+		// Temporal antialiasing: the velocity buffer, the pass that fills it and
+		// the two stand-in shaders it draws the scene with. All allocated on
+		// first use, and only when TAA is on.
+		RenderTargetSharedPtr _velocity_target;
+		RenderPassSharedPtr _velocity_pass;
+		ShaderSharedPtr _velocity_shader;
+		ShaderSharedPtr _velocity_shader_instanced;
+		// Latched on the first failure so a missing shader or a target that will
+		// not allocate is reported once rather than every frame.
+		bool _velocity_failed = false;
+		// Once per frame; see begin_frame() and render().
+		bool _velocity_done = false;
+
+		bool ensure_velocity_resources();
+		void encode_velocity_pass(const RenderSceneSharedPtr &scene,
+		                          const CameraSharedPtr &camera);
+
 		// it. See the note in encode_fullscreen_pass().
 		glm::mat4 _last_view = glm::mat4(1.0f);
 		glm::mat4 _last_projection = glm::mat4(1.0f);

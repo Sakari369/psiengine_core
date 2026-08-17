@@ -288,7 +288,17 @@ void PSIGLRenderer::draw_render_objs(const RenderSceneSharedPtr &scene,
 	bool have_previous = false;
 
 	for (const auto &obj : scene->m_render_objs) {
-		const ShaderSharedPtr &shader = obj->get_shader_ref();
+		// The velocity pass swaps every object's shader for one of two
+		// position-only ones; PSIRenderObj::draw() makes the same choice, and
+		// the two have to agree or the pipeline bound here is not the one the
+		// uniforms are staged into.
+		const ShaderSharedPtr &own = obj->get_shader_ref();
+		assert(own != nullptr);
+		const ShaderSharedPtr &shader = (ctx->shader_override != nullptr)
+			? (obj->is_instanced() && ctx->shader_override_instanced != nullptr
+				? ctx->shader_override_instanced
+				: ctx->shader_override)
+			: own;
 		assert(shader != nullptr);
 
 		const bool blended = obj->wants_blending();
@@ -341,6 +351,13 @@ void PSIGLRenderer::render(const RenderSceneSharedPtr &scene,
 	if (_metal_ctx == nullptr) {
 		return;
 	}
+
+	// The legacy path's frame boundary. It never reaches end_frame() -- a script
+	// on this path calls psi.video:flip(), which goes straight to the context --
+	// so the once-per-frame velocity pass is armed and fired here.
+	_velocity_done = false;
+	encode_velocity_pass(scene, camera);
+
 	// Render into the offscreen texture, or into the window's drawable.
 	MTL::RenderCommandEncoder *encoder = nullptr;
 	if (scene->get_render_to_texture() == true && _offscreen_texture != nullptr) {
@@ -403,6 +420,31 @@ void PSIGLRenderer::draw_scene_in_pass(const RenderSceneSharedPtr &scene,
 		// Get the default projection matrix.
 		ctx->projection.top() = camera->get_projection_matrix();
 
+		// Nudge the whole frame by a fraction of a pixel, so consecutive frames
+		// sample different points inside each pixel and the temporal resolve
+		// averages them. Zero unless TAA is on.
+		//
+		// Not for the velocity pass: the jitter is a property of the frame, not
+		// of the surface, and including it would have every static pixel report
+		// up to a pixel of motion. See PSIRenderContext::jitter_ndc.
+		//
+		// Written into the projection's third column rather than applied as a
+		// translation afterwards, because that is the one place a constant NDC
+		// offset can go: the column is multiplied by the view-space z and then
+		// divided by w, which is -z, so the depth cancels and every vertex
+		// shifts by the same amount however far away it is.
+		ctx->jitter_ndc = glm::vec2(0.0f, 0.0f);
+		if (_metal_ctx != nullptr && _metal_ctx->taa_enabled() && !ctx->velocity_pass) {
+			const glm::ivec2 size = _metal_ctx->get_render_size();
+			const glm::vec2 jitter = _metal_ctx->jitter_pixels();
+			if (size.x > 0 && size.y > 0) {
+				ctx->jitter_ndc = glm::vec2(2.0f * jitter.x / (float)size.x,
+				                            2.0f * jitter.y / (float)size.y);
+				ctx->projection.top()[2][0] = -ctx->jitter_ndc.x;
+				ctx->projection.top()[2][1] = -ctx->jitter_ndc.y;
+			}
+		}
+
 		STACK_PUSH(ctx->view);
 			// Look at where the camera view is looking at.
 			// This can be disabled per object with obj->set_is_camera_translated().
@@ -454,6 +496,10 @@ const FrameSharedPtr &PSIGLRenderer::begin_frame() {
 	// buffer itself is opened lazily by the first pass encoded, which is what
 	// lets a frame consist of offscreen passes only.
 	_frame->_pass_index = 0;
+	// Armed here, fired by the first encode_pass() that has a scene: the
+	// velocity buffer has to be filled before the resolve reads it, and this is
+	// the only hook that runs exactly once per frame on the pass path.
+	_velocity_done = false;
 
 	return _frame;
 }
@@ -465,6 +511,13 @@ void PSIGLRenderer::encode_pass(const RenderPassSharedPtr &pass,
 		return;
 	}
 
+	// Before the scene, not after: the velocity buffer describes this frame's
+	// motion and the temporal resolve at the end of the frame reads it. Fires at
+	// most once per frame, on the first pass that has a scene to draw.
+	if (scene != nullptr && camera != nullptr) {
+		encode_velocity_pass(scene, camera);
+	}
+
 	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_pass(*pass);
 	if (encoder == nullptr) {
 		// No drawable this frame (occluded), or the target failed to allocate.
@@ -473,6 +526,123 @@ void PSIGLRenderer::encode_pass(const RenderPassSharedPtr &pass,
 
 	if (scene != nullptr && camera != nullptr) {
 		draw_scene_in_pass(scene, _ctx, camera, pass->get_sorting());
+	}
+}
+
+// Allocate the velocity buffer and the two shaders that fill it.
+//
+// Lazy, because none of it is wanted unless TAA is on, and sized from the render
+// size so it follows a resize or a supersample change.
+bool PSIGLRenderer::ensure_velocity_resources() {
+	if (_velocity_failed || _metal_ctx == nullptr) {
+		return false;
+	}
+
+	// The display size, not the render size. The temporal resolve reads this at
+	// the display's resolution, and rendering it at the supersampled one would
+	// mean four times the fill for motion vectors that get averaged straight
+	// back down again.
+	const glm::ivec2 size = _metal_ctx->get_drawable_size();
+	if (size.x <= 0 || size.y <= 0) {
+		return false;
+	}
+
+	if (_velocity_target == nullptr || _velocity_target->get_size() != size) {
+		_velocity_target = PSIRenderTarget::create();
+		// Two channels of float. A motion vector is signed, usually a small
+		// fraction of the frame, and needs no more precision than this; a
+		// four-channel target would be twice the bandwidth for two unused
+		// channels.
+		if (_velocity_target->init(size, MTL::PixelFormatRG16Float, 1,
+		                           PSIRenderTarget::DEPTH_TRANSIENT) == false) {
+			psilog_err("Failed allocating the %dx%d velocity target; "
+			           "temporal antialiasing is off", size.x, size.y);
+			_velocity_failed = true;
+			return false;
+		}
+
+		_velocity_pass = PSIRenderPass::create();
+		_velocity_pass->set_target(_velocity_target);
+		// Zero is "did not move", which is the right answer everywhere the
+		// scene does not cover -- the resolve then reads the history at the
+		// same pixel, which is what a static background wants.
+		_velocity_pass->set_clear_color(glm::vec4(0.0f, 0.0f, 0.0f, 0.0f));
+		_velocity_pass->set_load_action(PSIRenderPass::LOAD_CLEAR);
+		_velocity_pass->set_cull_mode(PSIRenderPass::CULL_BACK);
+		// The depth buffer decides which surface's motion wins, so there is
+		// nothing for a sort to do.
+		_velocity_pass->set_sorting(false);
+	}
+
+	if (_velocity_shader == nullptr) {
+		// The paths are names, not files: add_from_file() keeps only the
+		// basename and the real source is velocity.metal in the metallib. Same
+		// convention psi.shader.create_instanced() documents.
+		_velocity_shader = make_shared<PSIGLShader>();
+		_velocity_shader->set_name("velocity");
+		_velocity_shader->create_program();
+		_velocity_shader->add_from_file(PSIGLShader::VERTEX, "velocity.vert");
+		_velocity_shader->add_from_file(PSIGLShader::FRAGMENT, "velocity.frag");
+		_velocity_shader->compile();
+
+		_velocity_shader_instanced = make_shared<PSIGLShader>();
+		_velocity_shader_instanced->set_name("velocity_instanced");
+		_velocity_shader_instanced->create_program();
+		_velocity_shader_instanced->set_instanced(true);
+		_velocity_shader_instanced->add_from_file(PSIGLShader::VERTEX, "velocity.vert");
+		_velocity_shader_instanced->add_from_file(PSIGLShader::FRAGMENT, "velocity.frag");
+		_velocity_shader_instanced->compile();
+
+		if (_velocity_shader->is_compiled() == false
+		 || _velocity_shader_instanced->is_compiled() == false) {
+			psilog_err("Failed compiling the velocity shaders; "
+			           "temporal antialiasing is off");
+			_velocity_failed = true;
+			return false;
+		}
+
+		_velocity_shader->add_uniforms();
+		_velocity_shader_instanced->add_uniforms();
+	}
+
+	return true;
+}
+
+// Draw the scene a second time, position only, into the velocity buffer.
+void PSIGLRenderer::encode_velocity_pass(const RenderSceneSharedPtr &scene,
+                                         const CameraSharedPtr &camera) {
+	if (_metal_ctx == nullptr || !_metal_ctx->taa_enabled()) {
+		return;
+	}
+	if (_velocity_done || scene == nullptr || camera == nullptr) {
+		return;
+	}
+	if (ensure_velocity_resources() == false) {
+		return;
+	}
+
+	// Marked done up front: a failure below should not have the next pass of the
+	// same frame try again.
+	_velocity_done = true;
+
+	MTL::RenderCommandEncoder *encoder = _metal_ctx->begin_pass(*_velocity_pass);
+	if (encoder == nullptr) {
+		return;
+	}
+
+	_ctx->shader_override = _velocity_shader;
+	_ctx->shader_override_instanced = _velocity_shader_instanced;
+	_ctx->velocity_pass = true;
+
+	draw_scene_in_pass(scene, _ctx, camera, false);
+
+	_ctx->velocity_pass = false;
+	_ctx->shader_override = nullptr;
+	_ctx->shader_override_instanced = nullptr;
+
+	const auto &texture = _velocity_target->get_color_texture();
+	if (texture != nullptr) {
+		_metal_ctx->set_velocity_texture(texture->get_metal_texture());
 	}
 }
 

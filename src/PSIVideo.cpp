@@ -2,19 +2,27 @@
 
 const GLint PSIVideo::DEF_SCREEN_WIDTH = 1280;
 const GLint PSIVideo::DEF_SCREEN_HEIGHT = 720; 
-// 2, not 8.
+// 4, which is what the device caps at for BGRA8 anyway -- asking for 8 only ever
+// meant "as much as you have".
 //
-// The device caps this at 4 for BGRA8 anyway, so 8 only ever meant "as much as
-// you have". With the depth and MSAA colour targets memoryless they live in
-// tile memory, and tile memory is the constraint: 4x MSAA needs 4 bytes of
-// colour plus 4 of depth per sample, 32 bytes per pixel, which is the whole
-// 32 KB budget for a 32x32 tile and forces the driver to use smaller tiles.
-// 2x halves that and leaves room.
+// This was 2, on the reasoning that tile memory is the constraint: with the
+// depth and MSAA colour targets memoryless, 4x MSAA needs 4 bytes of colour plus
+// 4 of depth per sample, 32 bytes per pixel, which is the whole 32 KB budget for
+// a 32x32 tile and forces the driver to use smaller tiles.
 //
-// Edges do not suffer much because the frame is also 2x supersampled and box
-// filtered on composite (PSIMetalContext::set_supersample_factor). -a/--antialias
-// still overrides this.
-const GLint PSIVideo::DEF_MSAA_SAMPLES = 2;
+// That is still true and it turns out not to cost anything here, because the
+// supersample factor came down at the same time and the tiles are covering a
+// quarter as many rendered pixels. Measured fullscreen at 2560x1440, gpu ms,
+// 2x MSAA then 4x:
+//
+//   plasma_cube  4.93 -> 4.98      prism_grid  2.06 -> 1.91
+//
+// Free on one and slightly faster on the other. Do not carry this over to a
+// higher supersample factor without measuring again -- at 3x it was a real cost,
+// which is where the old default came from.
+//
+// -a/--antialias still overrides this.
+const GLint PSIVideo::DEF_MSAA_SAMPLES = 4;
 
 PSIVideo::~PSIVideo() {
 }
@@ -126,29 +134,28 @@ bool PSIVideo::init() {
 	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
 	// to get edges smoother than multisampling alone can manage.
 	//
-	// 3x, meaning nine times the pixels of the window. It was 4x, and the extra
-	// step turned out to be nearly all cost: at 1920x1080 the two are hard to
-	// tell apart on the highest-contrast edge in any of these scenes once the
-	// frame has been resolved down to what the display shows, because the eye is
-	// comparing sixteen samples against nine rather than four against one.
+	// 2x, meaning four times the pixels of the window. It was 3x, spent against
+	// 2x MSAA; the same budget buys more as 2x supersampling against 4x MSAA,
+	// because MSAA is nearly free at this resolution (see DEF_MSAA_SAMPLES) and
+	// supersampling is priced in whole rendered pixels.
 	//
-	// What it buys, measured on this machine (gpu ms, 4x then 3x):
+	// Sample counts barely move -- 4 shading samples times 4 coverage samples
+	// against 9 times 2 -- and the cost does. Fullscreen at 2560x1440, gpu ms,
+	// 3x/2xMSAA then 2x/4xMSAA:
 	//
-	//   merkaba     1.80 -> 1.09      starfield   1.70 -> 1.00
-	//   pong_game   1.20 -> 0.76      prism_grid  3.46 -> 2.30
+	//   plasma_cube  13.37 -> 4.98      prism_grid  2.99 -> 1.91
 	//
-	// About a third off every scene. It matters most where it was hurting most:
-	// plasma_cube at 2560x1440 fullscreen goes 9.2 -> 6.5, which is the
-	// difference between fitting a 60 Hz budget and fitting a 120 Hz one.
+	// Captured frames of both were compared at 3x magnification on prism_grid's
+	// grazing prism silhouettes, which are the worst case in the tree, and are
+	// not tellable apart; whole-frame RMSE across plasma_cube, prism_grid,
+	// starfield, merkaba and text is 0.1-0.4%.
 	//
-	// Still supersampled rather than MSAA alone, for the original reason: four
-	// MSAA samples is not many gradations to describe a shallow edge with, and
-	// prism_grid's grazing prism silhouettes are the worst case in the tree.
+	// Still supersampled rather than MSAA alone, for the original reason: MSAA
+	// does nothing at all for shader aliasing, and the LED strips reflected in
+	// plasma_cube's diamond are the sharpest thing in any of these scenes.
 	//
-	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request. Note
-	// tools/capture_all.sh pins 2, so the pixel-diff harness is unaffected by
-	// this default and its baselines stay comparable across the change.
-	int supersample = 3;
+	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request.
+	int supersample = 2;
 	const char *ss_env = getenv("PSI_SUPERSAMPLE");
 	if (ss_env != nullptr) {
 		int parsed = atoi(ss_env);
@@ -161,6 +168,19 @@ bool PSIVideo::init() {
 		}
 	}
 	_metal_ctx->set_supersample_factor(supersample);
+
+	// Antialiasing mode. Off is the supersample-plus-MSAA behaviour that
+	// predates the temporal path; taa adds the jitter, the velocity pass and the
+	// history, and is what makes a supersample factor of 1 worth running at.
+	//
+	// Read here rather than from a script so a capture or a benchmark can pin it
+	// the same way PSI_SUPERSAMPLE does.
+	const char *aa_env = getenv("PSI_AA");
+	if (aa_env != nullptr) {
+		const bool want_taa = (std::string(aa_env) == "taa");
+		_metal_ctx->set_aa_mode(want_taa ? PSIMetalContext::AA_TAA
+		                                 : PSIMetalContext::AA_OFF);
+	}
 
 	_metal_ctx->set_vsync(_vsync);
 	if (_vsync) {

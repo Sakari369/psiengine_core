@@ -700,6 +700,8 @@ void PSIGLShader::resolve_hot_uniforms() {
 	_hot.normal_matrix     = get_uniform("u_normal_matrix");
 	_hot.color             = get_uniform("u_color");
 	_hot.elapsed_time      = get_uniform("u_elapsed_time");
+	_hot.prev_mvp_matrix   = get_uniform("u_prev_model_view_projection_matrix");
+	_hot.jitter            = get_uniform("u_jitter");
 
 	// Reflection reports nested struct members dotted, so these match the names
 	// setup_lights() used to pass.

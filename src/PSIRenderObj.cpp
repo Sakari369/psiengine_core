@@ -20,7 +20,21 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	// frame. The object owns all of these for the duration of the call.
 	const auto &material = _render_asset.material;
 	assert(material != nullptr);
-	const auto &shader = material->shader_ref();
+
+	// The velocity pass draws the whole scene with one position-only shader in
+	// place of every material's own; see PSIRenderContext::shader_override.
+	const bool overridden = (ctx->shader_override != nullptr);
+	const auto &own_shader = material->shader_ref();
+	assert(own_shader != nullptr);
+
+	const auto &mesh_for_shader = get_gl_mesh_ref();
+	const bool instanced = (mesh_for_shader != nullptr && mesh_for_shader->is_instanced());
+
+	const ShaderSharedPtr &shader = overridden
+		? (instanced && ctx->shader_override_instanced != nullptr
+			? ctx->shader_override_instanced
+			: ctx->shader_override)
+		: own_shader;
 	assert(shader != nullptr);
 	const PSIGLShader::hot_uniforms &hot = shader->hot();
 
@@ -85,7 +99,13 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	// There is no glActiveTexture equivalent: each texture goes onto the
 	// encoder at the slot its shader declared the matching name at, resolved
 	// from reflection. See PSIGLMaterial::bind_textures().
-	material->bind_textures(shader);
+	//
+	// Skipped for the velocity pass, which reads positions and nothing else --
+	// binding a material's textures to a shader that declares none is only
+	// wasted work.
+	if (!overridden) {
+		material->bind_textures(shader);
+	}
 
 	// Calculate mvp matrix for the shader.
 	//
@@ -96,13 +116,15 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 		// Interpolate new translation between current transform and previous transform.
 		PSIGLTransform render_transform = asset.transform;
 		render_transform.interpolate_from(asset.p_transform, ctx->transform_interpolation);
-		calc_model_view_projection(ctx, render_transform);
+		calc_mvp_with_history(ctx, render_transform);
 	} else {
-		calc_model_view_projection(ctx, asset.transform);
+		calc_mvp_with_history(ctx, asset.transform);
 	}
 
 	// Set uniforms specific for this render object.
 	shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
+	shader->set_uniform(hot.prev_mvp_matrix, get_prev_model_view_projection_matrix());
+	shader->set_uniform(hot.jitter, ctx->jitter_ndc);
 
 	// The unpremultiplied matrices, for every object rather than only instanced
 	// ones.
@@ -156,6 +178,28 @@ void PSIRenderObj::draw(const RenderContextSharedPtr &ctx) {
 	}
 	if (is_translated == false) {
 		ctx->view.pop();
+	}
+}
+
+void PSIRenderObj::calc_mvp_with_history(const RenderContextSharedPtr &ctx,
+                                         PSIGLTransform &transform) {
+	// Roll the previous frame's matrices over. Only in the velocity pass, and
+	// only once per frame -- see _prev_mvp. _mvp still holds what the last
+	// velocity pass computed, so this has to happen before the calc below.
+	if (ctx->velocity_pass && _prev_mvp_frame != ctx->elapsed_frames) {
+		if (_has_prev_mvp) {
+			_prev_mvp = _mvp;
+		}
+		_prev_mvp_frame = ctx->elapsed_frames;
+	}
+
+	calc_model_view_projection(ctx, transform);
+
+	// The first ever draw has no previous frame, so it reports no motion rather
+	// than motion from an uninitialised matrix.
+	if (ctx->velocity_pass && !_has_prev_mvp) {
+		_prev_mvp = _mvp;
+		_has_prev_mvp = true;
 	}
 }
 

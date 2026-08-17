@@ -258,7 +258,18 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 		return;
 	}
 
-	const auto &shader = get_shader_ref();
+	// The velocity pass draws the whole scene with one position-only shader.
+	//
+	// This has to be honoured here as well as in PSIRenderObj::draw(), because
+	// this function replaces that one entirely -- and it calls use_program()
+	// itself, which would put the glyph pipeline back over the one the renderer
+	// just bound. Left alone, text drew its coverage and colour into the
+	// RG16Float velocity target, so every pixel it covered reported a motion
+	// vector made of the glyph's alpha.
+	const bool overridden = (ctx->shader_override != nullptr);
+
+	const auto &own_shader = get_shader_ref();
+	const auto &shader = overridden ? ctx->shader_override : own_shader;
 	const auto &mesh = get_gl_mesh_ref();
 	const auto &material = get_render_asset().material;
 	// Only read by the assert below, which compiles out in release builds.
@@ -271,7 +282,10 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	assert(has_texture);
 
 	shader->use_program();
-	material->bind_textures(shader);
+	// The velocity shader reads positions and declares no textures.
+	if (!overridden) {
+		material->bind_textures(shader);
+	}
 
 	// Do we translate the text based on camera position ?
 	GLboolean is_translated = is_translated_by_camera();
@@ -281,10 +295,15 @@ void PSITextRenderer::draw(const RenderContextSharedPtr &ctx) {
 	}
 
 	STACK_PUSH(ctx->model);
-		calc_model_view_projection(ctx, get_render_asset().transform);
+		// Through the history-keeping version, so a label that moves reports
+		// where it moved from. Static text -- which is most of it -- gets a
+		// previous matrix equal to the current one and writes a zero motion
+		// vector, which is what stops the scene behind it dragging it around.
+		calc_mvp_with_history(ctx, get_render_asset().transform);
 
 		const PSIGLShader::hot_uniforms &hot = shader->hot();
 		shader->set_uniform(hot.mvp_matrix, get_model_view_projection_matrix());
+		shader->set_uniform(hot.prev_mvp_matrix, get_prev_model_view_projection_matrix());
 		shader->set_uniform(hot.color, material->get_color());
 
 		// We are not offsetting or setting custom draw count, just draw text as is.

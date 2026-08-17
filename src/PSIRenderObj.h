@@ -398,6 +398,43 @@ class PSIRenderObj {
 		// Model view projection.
 		struct transform_matrices _mvp;
 
+	public:
+		// Does this object's mesh draw its geometry more than once per call?
+		//
+		// The velocity pass needs it before the object draws, to pick between
+		// the plain and instanced stand-in shaders.
+		bool is_instanced() const {
+			const auto &mesh = get_gl_mesh_ref();
+			return mesh != nullptr && mesh->is_instanced();
+		}
+
+	protected:
+		// Compute this frame's matrices, keeping last frame's for the velocity
+		// pass.
+		//
+		// Subclasses that override draw() -- PSITextRenderer, Poly -- must call
+		// this rather than calc_model_view_projection() directly, or their
+		// objects report motion from whatever _prev_mvp happened to hold.
+		void calc_mvp_with_history(const RenderContextSharedPtr &ctx,
+		                           PSIGLTransform &transform);
+
+		const glm::mat4 &get_prev_model_view_projection_matrix() const {
+			return _prev_mvp.model_view_projection;
+		}
+
+	private:
+		// Where this object was last frame, for velocity.metal.
+		//
+		// Rolled over only while the velocity pass is encoding, which is once a
+		// frame and always with the unjittered projection. Rolling it over in
+		// draw() generally would be wrong twice: draw() runs more than once per
+		// frame in a multi-pass script, and the scene pass's matrices carry the
+		// TAA jitter, which is a property of the frame rather than of the
+		// object and would show up as every static pixel reporting motion.
+		struct transform_matrices _prev_mvp;
+		uint64_t _prev_mvp_frame = 0;
+		bool _has_prev_mvp = false;
+
 		// Normal matrix cache; see get_normal_matrix().
 		glm::mat3 _normal_matrix = glm::mat3(1.0f);
 		glm::mat4 _normal_matrix_src = glm::mat4(1.0f);

@@ -113,6 +113,13 @@ class PSIGLShader {
 			GLuint color             = (GLuint)INVALID_UNIFORM;
 			GLuint elapsed_time      = (GLuint)INVALID_UNIFORM;
 
+			// Temporal antialiasing. Only velocity.metal declares the previous
+			// MVP, and only godrays.metal the jitter, so for every other shader
+			// these stay INVALID_UNIFORM and writing them costs one bounds
+			// check.
+			GLuint prev_mvp_matrix   = (GLuint)INVALID_UNIFORM;
+			GLuint jitter            = (GLuint)INVALID_UNIFORM;
+
 			GLuint ambient_color     = (GLuint)INVALID_UNIFORM;
 			GLuint ambient_intensity = (GLuint)INVALID_UNIFORM;
 			GLuint light_pos         = (GLuint)INVALID_UNIFORM;

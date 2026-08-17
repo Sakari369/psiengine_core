@@ -117,6 +117,19 @@ class PSIVideo {
 			_metal_ctx->set_supersample_factor(factor);
 		}
 
+		// Temporal antialiasing on or off; see PSIMetalContext::AAMode.
+		//
+		// Same timing rule as set_supersample(): before anything is sized from
+		// get_render_size(), which for a script means inside psi.boot.
+		void set_aa_mode(GLint mode) {
+			if (_metal_ctx != nullptr) {
+				_metal_ctx->set_aa_mode(mode);
+			}
+		}
+		GLint get_aa_mode() const {
+			return (_metal_ctx != nullptr) ? _metal_ctx->get_aa_mode() : 0;
+		}
+
 		// The size the GPU actually renders at, which is the viewport times the
 		// supersample factor -- 3 by default, see init().
 		//

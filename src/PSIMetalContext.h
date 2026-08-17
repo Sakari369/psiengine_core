@@ -145,16 +145,76 @@ class PSIMetalContext {
 		// Apple silicon caps MSAA at 4x for this colour format, which is also
 		// what the OpenGL driver granted, so multisampling alone cannot be
 		// pushed further. Rendering the frame at N times the window size and
-		// letting the layer minify it on composite adds a clean NxN box filter
-		// on top of MSAA -- 2x supersampling plus 4x MSAA gives noticeably
-		// smoother edges than either alone.
+		// box filtering it down adds a clean NxN filter on top of MSAA -- 2x
+		// supersampling plus 4x MSAA gives noticeably smoother edges than
+		// either alone.
+		//
+		// The minification used to be Core Animation's: the layer's drawable was
+		// created at the supersampled size and kCAFilterLinear brought it back
+		// down on composite. That is what made fullscreen slow. macOS charges
+		// several milliseconds a frame to present a drawable larger than the
+		// display when the window is fullscreen, and nothing at all for the same
+		// drawable in a window -- measured at a flat ~6 ms on a 7680x4320
+		// drawable, independent of how much work the frame actually did. Every
+		// script was capped near 40 fps fullscreen because of it, including ones
+		// spending under a millisecond on the GPU.
+		//
+		// So the drawable is now always the size of the window and the box
+		// filter is ours, encoded in present(). See _scene_texture.
+		//
+		// That recovers almost all of it and not quite all. plasma_cube
+		// fullscreen went from a 23.2 ms mean to 17.5, against 16.7 for the same
+		// scene in a window of the same size -- so about five percent of frames
+		// still miss a vblank in fullscreen. It is not this: the residue is the
+		// same at every supersample factor, including 1, where the frame spends
+		// 2.7 ms on the GPU and the drawable is exactly the display's size, and
+		// it does not move when the drawable is acquired at the other end of the
+		// frame. Interleaved windowed/fullscreen runs confirm it is real and not
+		// machine state. Whatever it is, it is macOS's, and it is a tenth of the
+		// size of what was here before.
 		//
 		// Costs N^2 fill rate and N^2 render target memory. 1 disables it.
 		void set_supersample_factor(int factor);
 		int get_supersample_factor() const { return _supersample; }
 
 		// Size the renderer actually draws at (window size * supersample).
-		glm::ivec2 get_render_size() const { return _drawable_size; }
+		glm::ivec2 get_render_size() const { return _render_size; }
+
+		// Antialiasing mode.
+		//
+		// AA_OFF is supersampling plus MSAA and nothing else -- what the engine
+		// did before TAA existed. AA_TAA adds a jittered projection, a velocity
+		// buffer and a temporal resolve, which is what makes it worth dropping
+		// the supersample factor to 1: four times the pixels bought spatially
+		// against an unbounded number of samples accumulated over time.
+		//
+		// Set from PSI_AA=off|taa, or psi.video:set_aa_mode(). Must be set before
+		// anything is sized from get_render_size().
+		enum AAMode {
+			AA_OFF = 0,
+			AA_TAA = 1,
+		};
+		void set_aa_mode(int mode);
+		int get_aa_mode() const { return _aa_mode; }
+		bool taa_enabled() const { return _aa_mode == AA_TAA; }
+
+		// This frame's sub-pixel offset, in pixels, on the render-size grid.
+		//
+		// Zero unless TAA is on. PSIGLRenderer adds it to the projection so each
+		// frame samples a different point inside the pixel, and the resolve
+		// averages them; godrays.metal needs it too, because it builds its own
+		// ray from the projection's diagonal and would otherwise be the one
+		// unjittered thing in a jittered frame.
+		glm::vec2 jitter_pixels() const { return _jitter; }
+
+		// Where the velocity pass renders. Handed over by PSIGLRenderer, which
+		// owns the target; null when TAA is off or the pass has not run yet.
+		void set_velocity_texture(MTL::Texture *tex) { _velocity_texture = tex; }
+
+		// True once a frame has been accumulated, so the resolve knows whether
+		// there is any history to blend with. Cleared by anything that
+		// invalidates it: a resize, a mode change, the first frame.
+		bool history_valid() const { return _history_valid; }
 
 		MTL::Device *device() const { return _device; }
 		MTL::CommandQueue *queue() const { return _queue; }
@@ -319,9 +379,89 @@ class PSIMetalContext {
 		int _msaa_samples = 1;
 
 		// Supersampling factor and the window size before it is applied.
-		// _drawable_size is _logical_size * _supersample.
+		// _render_size is _logical_size * _supersample; _drawable_size is
+		// _logical_size, because the drawable must never be bigger than the
+		// display. See set_supersample_factor().
 		int _supersample = 1;
 		glm::ivec2 _logical_size = glm::ivec2(0, 0);
+		glm::ivec2 _render_size = glm::ivec2(0, 0);
+
+		// What a pass aimed at "the drawable" actually renders into.
+		//
+		// The frame is assembled here at _render_size, and present() box filters
+		// it down into the real drawable at _drawable_size. Kept at
+		// color_format() so pass_signature() is identical to what the drawable
+		// itself reported -- otherwise every shader in the tree would build a
+		// second pipeline variant for a format change nothing else can see.
+		MTL::Texture *_scene_texture = nullptr;
+		bool create_scene_texture(glm::ivec2 size);
+
+		// Did anything render into _scene_texture this frame? A frame that only
+		// ever touched offscreen targets has nothing to show, and presenting
+		// would put the previous frame's contents back on screen.
+		bool _scene_dirty = false;
+
+		// The box filter, built straight from the metallib rather than through
+		// PSIGLShader: it wants one texture and four bytes of parameters, and
+		// none of the uniform reflection, pass signatures or blend variants that
+		// class exists to manage.
+		MTL::RenderPipelineState *_resolve_pipeline = nullptr;
+		bool ensure_resolve_pipeline();
+		// Runs the box filter from one texture into another. `factor` is the
+		// NxN block each destination pixel averages, so 1 is a straight copy.
+		bool encode_box_filter(MTL::Texture *src, MTL::Texture *dst,
+		                       glm::ivec2 src_size, glm::ivec2 dst_size,
+		                       int factor, float sharpen);
+		void encode_resolve(MTL::Texture *source, glm::ivec2 src_size,
+		                    int factor, float sharpen);
+
+		// Temporal antialiasing.
+		//
+		// Two history textures, ping-ponged: the resolve reads the one the last
+		// frame wrote and writes the other. RGBA16Float rather than the
+		// drawable's format because an 8-bit accumulator quantises every blend
+		// and the error compounds over the tens of frames a still image
+		// accumulates for.
+		//
+		// _velocity_texture is not owned here -- PSIGLRenderer renders it into a
+		// PSIRenderTarget it owns and hands the texture over each frame.
+		// All of these are at _drawable_size, not _render_size.
+		//
+		// The temporal pass used to run at the supersampled size, which is where
+		// the frame is assembled -- and that is a lot of pixels to spend on it:
+		// nineteen texture reads each, over four times as many pixels at 2x. It
+		// doubled plasma_cube's frame.
+		//
+		// So the supersample box filter runs FIRST, into _taa_input, and the
+		// temporal pass works on the display-sized result. The spatial detail
+		// supersampling bought is already in those pixels by then, so nothing is
+		// given up for it.
+		int _aa_mode = AA_OFF;
+		MTL::Texture *_taa_input = nullptr;
+		MTL::Texture *_history[2] = { nullptr, nullptr };
+		MTL::Texture *_velocity_texture = nullptr;
+		MTL::RenderPipelineState *_taa_pipeline = nullptr;
+		bool _history_valid = false;
+		uint32_t _jitter_index = 0;
+		glm::vec2 _jitter = glm::vec2(0.0f, 0.0f);
+
+		// How hard the frame is sharpened on its way to the drawable, to undo
+		// the softening the temporal resolve leaves. Only applied with TAA on;
+		// see psi_sharpen() in resolve.metal. PSI_TAA_SHARPEN overrides it.
+		float _taa_sharpen = 0.0f;
+
+		bool create_history_textures(glm::ivec2 size);
+		bool ensure_taa_pipeline();
+		// Resolves _scene_texture against the history into the other history
+		// slot, and returns what present() should then filter to the drawable.
+		MTL::Texture *encode_taa(MTL::Texture *source);
+		// Picks the next Halton offset. Called once per presented frame.
+		void advance_jitter();
+
+		// Takes the frame's drawable if it does not already hold one. Where this
+		// is called from is a frame-pacing decision, not a correctness one --
+		// see the definition.
+		void acquire_drawable();
 
 		// Depth (and MSAA colour) targets for offscreen passes, allocated lazily
 		// to match whatever texture is being rendered into.

@@ -55,6 +55,28 @@ void PSIMetalContext::shutdown() {
 		_msaa_texture->release();
 		_msaa_texture = nullptr;
 	}
+	if (_scene_texture != nullptr) {
+		_scene_texture->release();
+		_scene_texture = nullptr;
+	}
+	if (_resolve_pipeline != nullptr) {
+		_resolve_pipeline->release();
+		_resolve_pipeline = nullptr;
+	}
+	if (_taa_pipeline != nullptr) {
+		_taa_pipeline->release();
+		_taa_pipeline = nullptr;
+	}
+	for (int i = 0; i < 2; i++) {
+		if (_history[i] != nullptr) {
+			_history[i]->release();
+			_history[i] = nullptr;
+		}
+	}
+	if (_taa_input != nullptr) {
+		_taa_input->release();
+		_taa_input = nullptr;
+	}
 	if (_offscreen_depth != nullptr) {
 		_offscreen_depth->release();
 		_offscreen_depth = nullptr;
@@ -277,7 +299,7 @@ void PSIMetalContext::set_msaa_samples(int samples) {
 	update_pass_signature(nullptr);
 
 	// Rebuild the render targets at the new sample count.
-	create_depth_texture(_drawable_size);
+	create_depth_texture(_render_size);
 }
 
 void PSIMetalContext::update_pass_signature(MTL::Texture *color_target) {
@@ -397,18 +419,60 @@ void PSIMetalContext::resize(glm::ivec2 logical_size) {
 
 	_logical_size = logical_size;
 
-	// Draw at supersample^2 the pixel count; the layer minifies it back to the
-	// window on composite, which is where the extra antialiasing comes from.
-	_drawable_size = logical_size * _supersample;
+	// Draw at supersample^2 the pixel count, into our own texture, and box
+	// filter it into the drawable in present(). The drawable itself stays the
+	// size of the window -- see set_supersample_factor() for why that matters
+	// far more than it looks like it should.
+	_render_size = logical_size * _supersample;
+	_drawable_size = logical_size;
 
 	PSIMetal::set_layer_drawable_size(_layer, _drawable_size.x, _drawable_size.y);
-	create_depth_texture(_drawable_size);
+	create_scene_texture(_render_size);
+	create_depth_texture(_render_size);
+	// At the DISPLAY size, not the render size: the temporal pass runs after the
+	// supersample filter. See _taa_input.
+	create_history_textures(_drawable_size);
 
 	if (_supersample > 1) {
 		psilog(PSILog::INIT, "Rendering at %dx%d for a %dx%d window (%dx supersampled)",
-		       _drawable_size.x, _drawable_size.y,
+		       _render_size.x, _render_size.y,
 		       logical_size.x, logical_size.y, _supersample);
 	}
+}
+
+// The colour target every "draw to the screen" pass actually writes to.
+//
+// Single-sampled: when MSAA is on this is the resolve destination, exactly as
+// the drawable used to be. Private rather than memoryless because present()
+// reads it back in a second pass.
+bool PSIMetalContext::create_scene_texture(glm::ivec2 size) {
+	if (_device == nullptr || size.x <= 0 || size.y <= 0) {
+		return false;
+	}
+
+	if (_scene_texture != nullptr) {
+		_scene_texture->release();
+		_scene_texture = nullptr;
+	}
+
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType(MTL::TextureType2D);
+	desc->setPixelFormat(color_format());
+	desc->setWidth(static_cast<NS::UInteger>(size.x));
+	desc->setHeight(static_cast<NS::UInteger>(size.y));
+	desc->setMipmapLevelCount(1);
+	desc->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+	desc->setStorageMode(MTL::StorageModePrivate);
+
+	_scene_texture = _device->newTexture(desc);
+	desc->release();
+
+	if (_scene_texture == nullptr) {
+		psilog_err("Failed creating scene texture %dx%d", size.x, size.y);
+		return false;
+	}
+
+	return true;
 }
 
 void PSIMetalContext::set_vsync(bool enabled) {
@@ -451,20 +515,17 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 	glm::ivec2 viewport_size;
 
 	if (to_drawable) {
-		// Acquire the drawable lazily, and only once per frame. It may already
-		// be held by an earlier pass, or still be null because the frame was
-		// opened by an offscreen pass that never needed one.
-		if (_drawable == nullptr) {
-			CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
-			_drawable = layer->nextDrawable();
-
-			if (_drawable == nullptr) {
-				// Occluded or minimized. present() still owns the frame slot
-				// and will commit and release it.
-				return nullptr;
-			}
+		// Not the drawable itself: the scene texture standing in for it, at the
+		// supersampled size. present() filters this down into the real drawable.
+		// See set_supersample_factor().
+		if (_scene_texture == nullptr) {
+			return nullptr;
 		}
-		viewport_size = _drawable_size;
+		// Nothing here needs it until encode_resolve(). Taken now anyway, which
+		// is when the drawable-targeted path always took it. See
+		// acquire_drawable().
+		acquire_drawable();
+		viewport_size = _render_size;
 	} else {
 		viewport_size = target->get_size();
 	}
@@ -516,14 +577,15 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_pass(const PSIRenderPass &pass
 	if (to_drawable) {
 		if (_msaa_texture != nullptr) {
 			color->setTexture(_msaa_texture);
-			color->setResolveTexture(_drawable->texture());
+			color->setResolveTexture(_scene_texture);
 			color->setStoreAction(MTL::StoreActionMultisampleResolve);
 			update_pass_signature(_msaa_texture);
 		} else {
-			color->setTexture(_drawable->texture());
+			color->setTexture(_scene_texture);
 			color->setStoreAction(MTL::StoreActionStore);
-			update_pass_signature(_drawable->texture());
+			update_pass_signature(_scene_texture);
 		}
+		_scene_dirty = true;
 
 		has_depth = (_depth_texture != nullptr);
 		if (_depth_texture != nullptr) {
@@ -628,19 +690,14 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 		_frame_started = true;
 	}
 
-	// Acquire the drawable lazily, and only once per frame. It may already be
-	// held (a second render() call) or still be null because the frame was
-	// opened by an offscreen pass that never needed one.
-	if (_drawable == nullptr) {
-		CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
-		_drawable = layer->nextDrawable();
-
-		if (_drawable == nullptr) {
-			// Occluded or minimized -- nothing to draw into. present() still
-			// owns the frame slot and will commit and release it.
-			return nullptr;
-		}
+	// Not the drawable itself: the scene texture standing in for it. present()
+	// filters this down into the real drawable.
+	if (_scene_texture == nullptr) {
+		return nullptr;
 	}
+	// Nothing here needs it until encode_resolve(). Taken now anyway, which is
+	// when the drawable-targeted path always took it. See acquire_drawable().
+	acquire_drawable();
 
 	MTL::RenderPassDescriptor *pass = MTL::RenderPassDescriptor::alloc()->init();
 
@@ -650,18 +707,20 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	                                           clear_color.b, clear_color.a));
 
 	if (_msaa_texture != nullptr) {
-		// Render into the multisampled target and resolve into the drawable as
-		// the pass ends. MultisampleResolve rather than StoreAndMultisampleResolve
-		// because nothing reads the multisampled samples afterwards.
+		// Render into the multisampled target and resolve into the scene texture
+		// as the pass ends. MultisampleResolve rather than
+		// StoreAndMultisampleResolve because nothing reads the multisampled
+		// samples afterwards.
 		color->setTexture(_msaa_texture);
-		color->setResolveTexture(_drawable->texture());
+		color->setResolveTexture(_scene_texture);
 		color->setStoreAction(MTL::StoreActionMultisampleResolve);
 		update_pass_signature(_msaa_texture);
 	} else {
-		color->setTexture(_drawable->texture());
+		color->setTexture(_scene_texture);
 		color->setStoreAction(MTL::StoreActionStore);
-		update_pass_signature(_drawable->texture());
+		update_pass_signature(_scene_texture);
 	}
+	_scene_dirty = true;
 
 	if (_depth_texture != nullptr) {
 		MTL::RenderPassDepthAttachmentDescriptor *depth = pass->depthAttachment();
@@ -681,12 +740,12 @@ MTL::RenderCommandEncoder *PSIMetalContext::begin_frame(const glm::vec4 &clear_c
 	}
 
 	// Match the OpenGL defaults the engine relied on: counter-clockwise front
-	// faces (Metal defaults to clockwise) and a viewport covering the drawable.
+	// faces (Metal defaults to clockwise) and a viewport covering the target.
 	_encoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
 	_encoder->setViewport(MTL::Viewport{
 		0.0, 0.0,
-		static_cast<double>(_drawable_size.x),
-		static_cast<double>(_drawable_size.y),
+		static_cast<double>(_render_size.x),
+		static_cast<double>(_render_size.y),
 		0.0, 1.0
 	});
 
@@ -909,7 +968,21 @@ bool PSIMetalContext::apply_output_mode() {
 	// drawable pass silently lost its multisampled attachment while the
 	// pipelines were still compiled for one, and validation caught the sample
 	// count mismatch on the first draw.
-	create_depth_texture(_drawable_size);
+	create_scene_texture(_render_size);
+	create_depth_texture(_render_size);
+	// _taa_input carries the drawable's format so that one box-filter pipeline
+	// serves both it and the drawable -- which means it has to be rebuilt here
+	// as well, or that shared pipeline matches only one of the two. Missing this
+	// showed up as a pipeline/framebuffer format mismatch in exactly the two
+	// scripts that turn colour management on.
+	create_history_textures(_drawable_size);
+
+	// The resolve pipeline declares the drawable's colour format, so it is stale
+	// too. Rebuilt lazily on the next present().
+	if (_resolve_pipeline != nullptr) {
+		_resolve_pipeline->release();
+		_resolve_pipeline = nullptr;
+	}
 
 	if (_capture_texture != nullptr) {
 		_capture_texture->release();
@@ -1034,12 +1107,500 @@ void PSIMetalContext::end_encoding() {
 	}
 }
 
+void PSIMetalContext::set_aa_mode(int mode) {
+	if (mode != AA_TAA) {
+		mode = AA_OFF;
+	}
+	if (mode == _aa_mode) {
+		return;
+	}
+
+	_aa_mode = mode;
+	// Whatever has accumulated was accumulated under the old mode, and with TAA
+	// off it was never written at all.
+	_history_valid = false;
+	_jitter_index = 0;
+	_jitter = glm::vec2(0.0f, 0.0f);
+
+	// 0.5, chosen by sweeping it rather than picked.
+	//
+	// The measure is how much high-frequency energy the frame carries -- the
+	// standard deviation of a Laplacian over it -- against a 2x supersampled
+	// render of the same frame, which is what "sharp" means here. plasma_cube at
+	// frame 90, reference 0.0500:
+	//
+	//   0.00  0.0335 (67%)   0.35  0.0454 (91%)   0.70  0.0521 (104%)
+	//   0.20  0.0412 (82%)   0.50  0.0486 (97%)
+	//
+	// So 0.5 lands within 3% of the supersampled reference and 0.7 is already
+	// past it. Note RMSE against that reference gets monotonically WORSE as this
+	// rises, which is why it is not the metric: added edge contrast is a
+	// deviation whether or not it is the deviation you wanted.
+	_taa_sharpen = (_aa_mode == AA_TAA) ? 0.5f : 0.0f;
+	const char *sharpen_env = getenv("PSI_TAA_SHARPEN");
+	if (sharpen_env != nullptr && _aa_mode == AA_TAA) {
+		_taa_sharpen = (float)atof(sharpen_env);
+	}
+
+	psilog(PSILog::INIT, "Antialiasing mode set to %s",
+	       _aa_mode == AA_TAA ? "TAA" : "off");
+
+	// The history textures are only allocated when TAA is on, so this is where
+	// they appear and disappear.
+	create_history_textures(_drawable_size);
+}
+
+// The two accumulation buffers and the downsampled frame they blend, or none of
+// them when TAA is off.
+//
+// `size` is the DISPLAY size, not the render size -- see the note on _taa_input.
+bool PSIMetalContext::create_history_textures(glm::ivec2 size) {
+	for (int i = 0; i < 2; i++) {
+		if (_history[i] != nullptr) {
+			_history[i]->release();
+			_history[i] = nullptr;
+		}
+	}
+	if (_taa_input != nullptr) {
+		_taa_input->release();
+		_taa_input = nullptr;
+	}
+
+	_history_valid = false;
+
+	if (_device == nullptr || _aa_mode != AA_TAA || size.x <= 0 || size.y <= 0) {
+		return true;
+	}
+
+	// What the supersample filter writes and the temporal pass reads. The
+	// drawable's own format, so one box-filter pipeline serves both this and the
+	// final write to the drawable.
+	{
+		MTL::TextureDescriptor *in_desc = MTL::TextureDescriptor::alloc()->init();
+		in_desc->setTextureType(MTL::TextureType2D);
+		in_desc->setPixelFormat(color_format());
+		in_desc->setWidth(static_cast<NS::UInteger>(size.x));
+		in_desc->setHeight(static_cast<NS::UInteger>(size.y));
+		in_desc->setMipmapLevelCount(1);
+		in_desc->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+		in_desc->setStorageMode(MTL::StorageModePrivate);
+		_taa_input = _device->newTexture(in_desc);
+		in_desc->release();
+
+		if (_taa_input == nullptr) {
+			psilog_err("Failed creating the TAA input texture %dx%d", size.x, size.y);
+			return false;
+		}
+	}
+
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType(MTL::TextureType2D);
+	// Float, not the drawable's 8-bit format. Every frame blends 10% of a new
+	// sample into this; quantising that to 8 bits both stops the average
+	// converging and leaves a visible dither pattern where it lands between
+	// levels.
+	desc->setPixelFormat(MTL::PixelFormatRGBA16Float);
+	desc->setWidth(static_cast<NS::UInteger>(size.x));
+	desc->setHeight(static_cast<NS::UInteger>(size.y));
+	desc->setMipmapLevelCount(1);
+	desc->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+	desc->setStorageMode(MTL::StorageModePrivate);
+
+	for (int i = 0; i < 2; i++) {
+		_history[i] = _device->newTexture(desc);
+		if (_history[i] == nullptr) {
+			psilog_err("Failed creating TAA history texture %dx%d", size.x, size.y);
+			desc->release();
+			return false;
+		}
+	}
+
+	desc->release();
+	return true;
+}
+
+// Radical inverse of `index` in `base` -- the Halton sequence.
+//
+// Each new term lands in the largest gap the previous ones left, so any prefix
+// of it covers the pixel about as evenly as that many samples can. A regular
+// grid would too, but only at its own length; this stays well distributed if the
+// sequence is cut short by the history being thrown away.
+static float psi_halton(uint32_t index, uint32_t base) {
+	float f = 1.0f;
+	float result = 0.0f;
+
+	while (index > 0) {
+		f /= (float)base;
+		result += f * (float)(index % base);
+		index /= base;
+	}
+
+	return result;
+}
+
+void PSIMetalContext::advance_jitter() {
+	if (_aa_mode != AA_TAA) {
+		_jitter = glm::vec2(0.0f, 0.0f);
+		return;
+	}
+
+	// 16 offsets before repeating. Long enough that the pixel is well covered,
+	// short enough that a still image settles on a stable average instead of
+	// drifting through new samples forever.
+	_jitter_index = (_jitter_index + 1) % 16;
+
+	// Halton is 1-based; term 0 is 0 in every base, which would put a sample
+	// exactly at the pixel corner.
+	uint32_t term = _jitter_index + 1;
+
+	_jitter = glm::vec2(psi_halton(term, 2) - 0.5f,
+	                    psi_halton(term, 3) - 0.5f);
+}
+
+bool PSIMetalContext::ensure_taa_pipeline() {
+	if (_taa_pipeline != nullptr) {
+		return true;
+	}
+	if (_device == nullptr) {
+		return false;
+	}
+
+	MTL::Library *library = shader_library();
+	if (library == nullptr) {
+		return false;
+	}
+
+	NS::String *vs_name = NS::String::string("vertex_taa_resolve", NS::UTF8StringEncoding);
+	NS::String *fs_name = NS::String::string("fragment_taa_resolve", NS::UTF8StringEncoding);
+	MTL::Function *vs = library->newFunction(vs_name);
+	MTL::Function *fs = library->newFunction(fs_name);
+
+	if (vs == nullptr || fs == nullptr) {
+		psilog_err("taa_resolve.metal is missing from psishaders.metallib; "
+		           "falling back to no temporal antialiasing");
+		if (vs != nullptr) { vs->release(); }
+		if (fs != nullptr) { fs->release(); }
+		return false;
+	}
+
+	MTL::RenderPipelineDescriptor *desc = MTL::RenderPipelineDescriptor::alloc()->init();
+	desc->setVertexFunction(vs);
+	desc->setFragmentFunction(fs);
+	// The history's format, which is what this writes into.
+	desc->colorAttachments()->object(0)->setPixelFormat(MTL::PixelFormatRGBA16Float);
+	desc->setSampleCount(1);
+
+	NS::Error *error = nullptr;
+	_taa_pipeline = _device->newRenderPipelineState(desc, &error);
+
+	desc->release();
+	vs->release();
+	fs->release();
+
+	if (_taa_pipeline == nullptr) {
+		const char *msg = "unknown error";
+		if (error != nullptr && error->localizedDescription() != nullptr) {
+			msg = error->localizedDescription()->utf8String();
+		}
+		psilog_err("Failed creating the TAA pipeline: %s", msg);
+		return false;
+	}
+
+	return true;
+}
+
+// Blend _scene_texture into the history and return what to show.
+//
+// Returns _scene_texture unchanged whenever TAA cannot run -- no pipeline, no
+// velocity buffer, mode off -- so the caller always has something to present and
+// a missing piece degrades to the previous behaviour rather than a black frame.
+MTL::Texture *PSIMetalContext::encode_taa(MTL::Texture *source) {
+	if (_aa_mode != AA_TAA || source == nullptr || !_scene_dirty) {
+		return nullptr;
+	}
+	if (_velocity_texture == nullptr || _history[0] == nullptr) {
+		return nullptr;
+	}
+	if (!ensure_taa_pipeline()) {
+		return nullptr;
+	}
+
+	// Read the slot last frame wrote, write the other.
+	const uint32_t write_slot = (uint32_t)(_frame_counter & 1);
+	MTL::Texture *dst = _history[write_slot];
+	MTL::Texture *src = _history[write_slot ^ 1];
+
+	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::alloc()->init();
+	MTL::RenderPassColorAttachmentDescriptor *color = desc->colorAttachments()->object(0);
+	color->setTexture(dst);
+	color->setLoadAction(MTL::LoadActionDontCare);
+	color->setStoreAction(MTL::StoreActionStore);
+
+	MTL::RenderCommandEncoder *encoder = _cmd->renderCommandEncoder(desc);
+	desc->release();
+
+	if (encoder == nullptr) {
+		psilog_err("Failed creating the TAA encoder");
+		return nullptr;
+	}
+
+	struct {
+		uint32_t width;
+		uint32_t height;
+		uint32_t have_history;
+		uint32_t pad;
+	} params = {
+		(uint32_t)_drawable_size.x,
+		(uint32_t)_drawable_size.y,
+		_history_valid ? 1u : 0u,
+		0
+	};
+
+	// Bilinear and clamped: the history is sampled at a reprojected position
+	// that lands between texels, and the clamp keeps a sample near the frame
+	// edge from wrapping to the far side.
+	MTL::SamplerDescriptor *sampler_desc = MTL::SamplerDescriptor::alloc()->init();
+	sampler_desc->setMinFilter(MTL::SamplerMinMagFilterLinear);
+	sampler_desc->setMagFilter(MTL::SamplerMinMagFilterLinear);
+	sampler_desc->setSAddressMode(MTL::SamplerAddressModeClampToEdge);
+	sampler_desc->setTAddressMode(MTL::SamplerAddressModeClampToEdge);
+	MTL::SamplerState *sampler = _device->newSamplerState(sampler_desc);
+	sampler_desc->release();
+
+	encoder->setRenderPipelineState(_taa_pipeline);
+	encoder->setViewport(MTL::Viewport{
+		0.0, 0.0,
+		static_cast<double>(_drawable_size.x),
+		static_cast<double>(_drawable_size.y),
+		0.0, 1.0
+	});
+	encoder->setFragmentTexture(source, 0);
+	encoder->setFragmentTexture(src, 1);
+	encoder->setFragmentSamplerState(sampler, 1);
+	encoder->setFragmentTexture(_velocity_texture, 2);
+	encoder->setFragmentBytes(&params, sizeof(params), 0);
+	encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, (NS::UInteger)0, (NS::UInteger)3);
+	encoder->endEncoding();
+
+	if (sampler != nullptr) {
+		sampler->release();
+	}
+
+	_encoder = nullptr;
+	_current_shader = nullptr;
+	_history_valid = true;
+
+	return dst;
+}
+
+// Take the frame's drawable, if we have not already.
+//
+// Called as soon as a pass aims at the screen, even though nothing renders into
+// it until encode_resolve() at the end of the frame. With vsync on
+// nextDrawable() blocks until Core Animation has one free, so this is where the
+// frame waits, and it seemed worth knowing whether waiting before encoding the
+// frame or after it changed the pacing. Measured interleaved over three pairs of
+// 400-frame runs, plasma_cube fullscreen: 17.65/17.28/17.61 ms early against
+// 17.42/17.47/17.70 late. It does not matter.
+//
+// So it stays here, which is where the drawable-targeted path always took it.
+void PSIMetalContext::acquire_drawable() {
+	if (_drawable != nullptr || _layer == nullptr) {
+		return;
+	}
+
+	CA::MetalLayer *layer = reinterpret_cast<CA::MetalLayer *>(_layer);
+	_drawable = layer->nextDrawable();
+	// Null means occluded or minimized. Every caller treats that as "skip the
+	// frame"; present() still owns the frame slot and will commit and release it.
+}
+
+bool PSIMetalContext::ensure_resolve_pipeline() {
+	if (_resolve_pipeline != nullptr) {
+		return true;
+	}
+	if (_device == nullptr) {
+		return false;
+	}
+
+	MTL::Library *library = shader_library();
+	if (library == nullptr) {
+		return false;
+	}
+
+	NS::String *vs_name = NS::String::string("vertex_resolve", NS::UTF8StringEncoding);
+	NS::String *fs_name = NS::String::string("fragment_resolve", NS::UTF8StringEncoding);
+	MTL::Function *vs = library->newFunction(vs_name);
+	MTL::Function *fs = library->newFunction(fs_name);
+
+	if (vs == nullptr || fs == nullptr) {
+		psilog_err("resolve.metal is missing from psishaders.metallib "
+		           "(vertex_resolve / fragment_resolve); the frame cannot reach "
+		           "the screen");
+		if (vs != nullptr) { vs->release(); }
+		if (fs != nullptr) { fs->release(); }
+		return false;
+	}
+
+	MTL::RenderPipelineDescriptor *desc = MTL::RenderPipelineDescriptor::alloc()->init();
+	desc->setVertexFunction(vs);
+	desc->setFragmentFunction(fs);
+	// The drawable's format, not the scene texture's. They are the same today --
+	// see create_scene_texture() -- but this one is the one that has to match.
+	desc->colorAttachments()->object(0)->setPixelFormat(_color_format);
+	// The resolve target is the drawable, which is never multisampled, and the
+	// pass has no depth attachment to declare.
+	desc->setSampleCount(1);
+
+	NS::Error *error = nullptr;
+	_resolve_pipeline = _device->newRenderPipelineState(desc, &error);
+
+	desc->release();
+	vs->release();
+	fs->release();
+
+	if (_resolve_pipeline == nullptr) {
+		const char *msg = "unknown error";
+		if (error != nullptr && error->localizedDescription() != nullptr) {
+			msg = error->localizedDescription()->utf8String();
+		}
+		psilog_err("Failed creating the resolve pipeline (colour format %u): %s",
+		           (unsigned)_color_format, msg);
+		return false;
+	}
+
+	return true;
+}
+
+// Box filter _scene_texture into the drawable.
+//
+// This is the whole of the supersample downsample, and at factor 1 it is a
+// straight copy -- which is still worth doing rather than rendering to the
+// drawable directly, because it keeps one code path and lets the scene texture
+// be read by later passes (see the TAA work).
+bool PSIMetalContext::encode_box_filter(MTL::Texture *src, MTL::Texture *dst,
+                                        glm::ivec2 src_size, glm::ivec2 dst_size,
+                                        int factor, float sharpen) {
+	if (src == nullptr || dst == nullptr || _cmd == nullptr) {
+		return false;
+	}
+	if (!ensure_resolve_pipeline()) {
+		return false;
+	}
+
+	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::alloc()->init();
+	MTL::RenderPassColorAttachmentDescriptor *color = desc->colorAttachments()->object(0);
+	color->setTexture(dst);
+	// Every pixel is written, so there is nothing to preserve and nothing worth
+	// clearing.
+	color->setLoadAction(MTL::LoadActionDontCare);
+	color->setStoreAction(MTL::StoreActionStore);
+
+	MTL::RenderCommandEncoder *encoder = _cmd->renderCommandEncoder(desc);
+	desc->release();
+
+	if (encoder == nullptr) {
+		psilog_err("Failed creating the resolve encoder");
+		return false;
+	}
+
+	struct {
+		uint32_t src_width;
+		uint32_t src_height;
+		uint32_t factor;
+		float sharpen;
+	} params = {
+		(uint32_t)src_size.x,
+		(uint32_t)src_size.y,
+		(uint32_t)(factor < 1 ? 1 : factor),
+		sharpen
+	};
+
+	encoder->setRenderPipelineState(_resolve_pipeline);
+	encoder->setViewport(MTL::Viewport{
+		0.0, 0.0,
+		static_cast<double>(dst_size.x),
+		static_cast<double>(dst_size.y),
+		0.0, 1.0
+	});
+	encoder->setFragmentTexture(src, 0);
+	encoder->setFragmentBytes(&params, sizeof(params), 0);
+	encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, (NS::UInteger)0, (NS::UInteger)3);
+	encoder->endEncoding();
+
+	// The next pass to open must not think this encoder is still current.
+	_encoder = nullptr;
+	_current_shader = nullptr;
+
+	return true;
+}
+
+void PSIMetalContext::encode_resolve(MTL::Texture *source, glm::ivec2 src_size,
+                                     int factor, float sharpen) {
+	if (_layer == nullptr || source == nullptr || !_scene_dirty) {
+		return;
+	}
+	if (!ensure_resolve_pipeline()) {
+		return;
+	}
+
+	acquire_drawable();
+
+	if (_drawable == nullptr) {
+		// Occluded or minimized. present() still owns the frame slot and will
+		// commit and release it.
+		return;
+	}
+
+	encode_box_filter(source, _drawable->texture(), src_size, _drawable_size,
+	                  factor, sharpen);
+}
+
 void PSIMetalContext::present() {
 	if (!_frame_started) {
 		return;
 	}
 
 	end_encoding();
+
+	// What reaches the drawable, and how much filtering is left to do on the way.
+	//
+	// Without TAA that is the supersampled frame, box filtered down in one step.
+	// With it, the box filter runs first -- so the temporal pass works at the
+	// display's resolution rather than the supersampled one, which is a quarter
+	// of the pixels at 2x -- and what comes out of the history only has to be
+	// copied.
+	MTL::Texture *shown = _scene_texture;
+	glm::ivec2 shown_size = _render_size;
+	int factor = _supersample;
+	// Only a temporally resolved frame is sharpened. A supersampled one was
+	// never softened, so sharpening it would just add edge contrast that was not
+	// in the scene -- and it keeps the TAA-off path bit-identical to before.
+	float sharpen = 0.0f;
+
+	if (taa_enabled() && _taa_input != nullptr && _scene_dirty) {
+		if (encode_box_filter(_scene_texture, _taa_input,
+		                      _render_size, _drawable_size, _supersample, 0.0f)) {
+			MTL::Texture *resolved = encode_taa(_taa_input);
+			if (resolved != nullptr) {
+				shown = resolved;
+				shown_size = _drawable_size;
+				factor = 1;
+				sharpen = _taa_sharpen;
+			} else {
+				// TAA sat this frame out -- no velocity buffer yet, or the
+				// pipeline failed. The downsampled frame is still correct, it
+				// simply has not been accumulated.
+				shown = _taa_input;
+				shown_size = _drawable_size;
+				factor = 1;
+			}
+		}
+	}
+
+	// Acquires the drawable, so everything below that tests _drawable is testing
+	// whether this succeeded.
+	encode_resolve(shown, shown_size, factor, sharpen);
 
 	// Keep a CPU-readable copy of what we are about to show.
 	//
@@ -1048,9 +1609,13 @@ void PSIMetalContext::present() {
 	// has to be made now, while the texture is still ours.
 	//
 	// Only when someone has actually asked for it. This is a full-screen read
-	// plus write of the drawable every frame, and the drawable is the
-	// supersampled size; unconditionally it was the single largest bandwidth
-	// consumer in the engine.
+	// plus write of the drawable every frame; unconditionally it was the single
+	// largest bandwidth consumer in the engine.
+	//
+	// The source is the drawable, after the resolve, so a screenshot is the
+	// window's size and shows the antialiasing rather than the raw supersampled
+	// buffer. It used to be the supersampled drawable itself, which came out at
+	// three times the window.
 	if (_capture_armed && _drawable != nullptr && ensure_capture_texture(_drawable_size)) {
 		MTL::BlitCommandEncoder *blit = _cmd->blitCommandEncoder();
 		if (blit != nullptr) {
@@ -1096,10 +1661,18 @@ void PSIMetalContext::present() {
 	_cmd = nullptr;
 	_drawable = nullptr;
 	_frame_started = false;
+	_scene_dirty = false;
+	// The velocity buffer belongs to the frame that rendered it; the next frame
+	// has to produce its own or TAA sits out.
+	_velocity_texture = nullptr;
 
 	// Move to the next in-flight slot. Here rather than in begin_frame() so a
 	// frame that render()s twice keeps writing into one slot.
+	//
+	// This also flips which history texture TAA reads and writes, so it has to
+	// happen after encode_taa() above and before the next frame's jitter.
 	_frame_counter++;
+	advance_jitter();
 
 	// Everything autoreleased while encoding goes now.
 	if (_frame_pool != nullptr) {
