@@ -201,6 +201,12 @@ class PSIMetalContext {
 		// Post-resolve sharpening strength; 0 with TAA off. See _taa_sharpen.
 		float get_taa_sharpen() const { return _taa_sharpen; }
 
+		// How many sub-pixel offsets the jitter cycles through before it
+		// repeats. Long enough to cover the pixel well, short enough that a
+		// still image settles on a stable average instead of drifting through
+		// new samples forever. See advance_jitter().
+		static constexpr int JITTER_PERIOD = 16;
+
 		// This frame's sub-pixel offset, in pixels, on the render-size grid.
 		//
 		// Zero unless TAA is on. PSIGLRenderer adds it to the projection so each

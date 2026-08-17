@@ -338,12 +338,24 @@ void PSIVideo::print_video_state() {
 	// frames. They are not alternatives and both are usually on.
 	const int msaa = _metal_ctx->get_msaa_samples();
 	if (_metal_ctx->taa_enabled()) {
-		say("[video] aa         TAA (jittered, %d-frame history), sharpen %.2f, %dx MSAA\n",
-		    16, (double)_metal_ctx->get_taa_sharpen(), msaa);
+		say("[video] aa         TAA (jittered, %d-frame history), sharpen %.2f\n",
+		    PSIMetalContext::JITTER_PERIOD, (double)_metal_ctx->get_taa_sharpen());
 	} else {
-		say("[video] aa         no TAA, %dx MSAA%s\n", msaa,
-		    supersample > 1 ? " over supersampling" : "");
+		say("[video] aa         no TAA%s\n",
+		    supersample > 1 ? ", supersampling only" : ", MSAA only");
 	}
+
+	// On its own line, and qualified, because the unqualified version was a lie
+	// for a third of the scripts here.
+	//
+	// This count applies to passes that draw to the drawable. A pass aimed at a
+	// PSIRenderTarget takes the sample count that target was built with, and
+	// psi.render_target defaults it to 1 -- so a script that renders its scene
+	// offscreen and composites gets no multisampling at all unless it asks. The
+	// startup line claimed 4x MSAA on plasma_cube for a scene where captures at
+	// 1x, 2x and 4x came out byte-identical.
+	say("[video] msaa       %dx on passes drawing to the drawable; "
+	    "a render target carries its own\n", msaa);
 
 	// How the numbers the shaders write are meant to be read, and what the
 	// display can currently do with them.

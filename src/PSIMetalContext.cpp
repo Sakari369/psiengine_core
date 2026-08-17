@@ -1250,10 +1250,7 @@ void PSIMetalContext::advance_jitter() {
 		return;
 	}
 
-	// 16 offsets before repeating. Long enough that the pixel is well covered,
-	// short enough that a still image settles on a stable average instead of
-	// drifting through new samples forever.
-	_jitter_index = (_jitter_index + 1) % 16;
+	_jitter_index = (_jitter_index + 1) % JITTER_PERIOD;
 
 	// Halton is 1-based; term 0 is 0 in every base, which would put a sample
 	// exactly at the pixel corner.
