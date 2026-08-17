@@ -505,6 +505,14 @@ class PSIVideo {
 		void set_opengl_window_hints();
 
 		// Print currently used MSAA samples.
+		// One block describing what the renderer actually ended up with.
+		//
+		// Read back from the context after setup rather than from what was
+		// asked for, because several of these can differ from the request: the
+		// device clamps the MSAA count, PSI_SUPERSAMPLE and PSI_AA override what
+		// a script wanted, and the layer can refuse EDR.
+		void print_video_state();
+
 		void print_msaa_samples();
 
 		// Print viewport dimensions.

@@ -198,6 +198,9 @@ class PSIMetalContext {
 		int get_aa_mode() const { return _aa_mode; }
 		bool taa_enabled() const { return _aa_mode == AA_TAA; }
 
+		// Post-resolve sharpening strength; 0 with TAA off. See _taa_sharpen.
+		float get_taa_sharpen() const { return _taa_sharpen; }
+
 		// This frame's sub-pixel offset, in pixels, on the render-size grid.
 		//
 		// Zero unless TAA is on. PSIGLRenderer adds it to the projection so each

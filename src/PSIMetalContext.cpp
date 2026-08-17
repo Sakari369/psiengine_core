@@ -993,10 +993,16 @@ bool PSIMetalContext::apply_output_mode() {
 	// The signature held between passes is the drawable's, and it just changed.
 	_pass_signature.color_format = _color_format;
 
-	static const char *names[] = { "BGRA8Unorm (legacy, unmanaged)",
+	static const char *names[] = { "BGRA8Unorm (unmanaged)",
 	                               "BGRA8Unorm_sRGB (colour managed)",
 	                               "RGBA16Float (EDR)" };
-	psilog(PSILog::VIDEO, "Drawable is now %s", names[mode]);
+	// Deliberately the same shape as the "output" line in
+	// PSIVideo::print_video_state(), because that is what this supersedes: the
+	// block is printed from init(), before any script has run, and a script that
+	// asks for EDR or colour management does so afterwards. Reading as an update
+	// to that line is the point -- it used to be a differently-formatted message
+	// that simply contradicted it.
+	psilog_func(PSILog::MSG, "[video] output     %s, set by the script\n", names[mode]);
 
 	return true;
 }

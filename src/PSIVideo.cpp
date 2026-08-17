@@ -61,7 +61,7 @@ bool PSIVideo::init() {
 
 	// Get content scaling.
 	glfwGetMonitorContentScale(fullscreen_monitor, &_content_scaling.x, &_content_scaling.y);
-	psilog(PSILog::VIDEO, "monitor content scale = %f x %f", _content_scaling.x, _content_scaling.y);
+	psilog(PSILog::INIT, "monitor content scale = %f x %f", _content_scaling.x, _content_scaling.y);
 
 	// Get resolution for desired monitor.
 	const GLFWvidmode *fullscreen_mode = glfwGetVideoMode(fullscreen_monitor);
@@ -79,7 +79,7 @@ bool PSIVideo::init() {
 		_win_size.x = _content_scaling.x * fullscreen_mode->width;
 		_win_size.y = _content_scaling.y * fullscreen_mode->height;
 
-		psilog(PSILog::VIDEO, "Window size got from fullscreen mode = %d x %d", _win_size.x, _win_size.y);
+		psilog(PSILog::INIT, "Window size got from fullscreen mode = %d x %d", _win_size.x, _win_size.y);
 	}
 
 	glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
@@ -101,7 +101,7 @@ bool PSIVideo::init() {
 	GLint framebuf_height;
 	glfwGetFramebufferSize(_window, &framebuf_width, &framebuf_height);
 
-	psilog(PSILog::VIDEO, "win_width = %d win_height = %d framebuf_width = %d framebuf_height = %d", _win_size.x, _win_size.y, framebuf_width, framebuf_height);
+	psilog(PSILog::INIT, "win_width = %d win_height = %d framebuf_width = %d framebuf_height = %d", _win_size.x, _win_size.y, framebuf_width, framebuf_height);
 
 	glm::ivec2 viewport_size;
 	if (is_fullscreen()) {
@@ -194,17 +194,16 @@ bool PSIVideo::init() {
 
 	_metal_ctx->set_vsync(_vsync);
 	if (_vsync) {
-		psilog(PSILog::VIDEO, "Enabled VSYNC");
+		psilog(PSILog::INIT, "Enabled VSYNC");
 	} else {
-		psilog(PSILog::VIDEO, "Disabled VSYNC");
+		psilog(PSILog::INIT, "Disabled VSYNC");
 	}
 
 	// Resize our drawable to the actual frame buffer size.
 	resize_viewport(viewport_size.x, viewport_size.y);
 
 	// Information.
-	print_msaa_samples();
-	print_viewport_dimensions();
+	print_video_state();
 
 	// Show mouse cursor ?
 	if (_cursor_disabled) {
@@ -284,10 +283,87 @@ void PSIVideo::set_opengl_window_hints() {
 
 	// MSAA is no longer a window hint. Under Metal it means rendering into a
 	// multisampled texture and resolving into the drawable, which the renderer
-	// sets up. Logged here so the existing startup output does not change.
-	if (_msaa_samples > 1) {
-		psilog(PSILog::VIDEO, "Creating window with %d MSAA samples", _msaa_samples);
+	// sets up.
+	//
+	// Not logged here any more: at this point _msaa_samples is what was asked
+	// for rather than what the device granted, and printing the request as
+	// though it were the result was actively misleading -- the old line claimed
+	// 8 samples on a device that caps at 4. print_video_state() reports the
+	// granted count, after the context has clamped it.
+}
+
+void PSIVideo::print_video_state() {
+	if (_metal_ctx == nullptr) {
+		psilog_err("No Metal context to report on");
+		return;
 	}
+
+	// psilog_func directly rather than the psilog macros: those prefix every
+	// line with a line number and the enclosing function's full signature,
+	// which is right for tracing and wrong for a block someone is meant to
+	// read. This matches the "[video] ..." line psi.internal_status() prints.
+	const auto say = [](const char *fmt, auto... args) {
+		psilog_func(PSILog::MSG, fmt, args...);
+	};
+
+	// The display.
+	GLFWmonitor *monitor = get_fullscreen_monitor();
+	const GLFWvidmode *mode = (monitor != nullptr) ? glfwGetVideoMode(monitor) : nullptr;
+	if (monitor != nullptr && mode != nullptr) {
+		say("[video] display    %s, %dx%d @%dHz, content scale %.2gx\n",
+		    glfwGetMonitorName(monitor), mode->width, mode->height,
+		    mode->refreshRate, (double)_content_scaling.x);
+	}
+
+	// The window, and the surface being presented to it. These are the same
+	// size now and were not always: the drawable used to be created at the
+	// supersampled size, which is what made fullscreen slow.
+	const glm::ivec2 drawable = _metal_ctx->get_drawable_size();
+	say("[video] window     %s %dx%d, drawable %dx%d\n",
+	    is_fullscreen() ? "fullscreen" : "windowed",
+	    _viewport.size.w, _viewport.size.h, drawable.x, drawable.y);
+
+	// What the GPU actually rasterises, which is the viewport times the
+	// supersample factor.
+	const glm::ivec2 render = _metal_ctx->get_render_size();
+	const int supersample = _metal_ctx->get_supersample_factor();
+	if (supersample > 1) {
+		say("[video] render     %dx%d, %dx supersampled (%.1fx the drawable's pixels)\n",
+		    render.x, render.y, supersample, (double)(supersample * supersample));
+	} else {
+		say("[video] render     %dx%d, no supersampling\n", render.x, render.y);
+	}
+
+	// Antialiasing. MSAA is coverage within one frame; TAA is samples across
+	// frames. They are not alternatives and both are usually on.
+	const int msaa = _metal_ctx->get_msaa_samples();
+	if (_metal_ctx->taa_enabled()) {
+		say("[video] aa         TAA (jittered, %d-frame history), sharpen %.2f, %dx MSAA\n",
+		    16, (double)_metal_ctx->get_taa_sharpen(), msaa);
+	} else {
+		say("[video] aa         no TAA, %dx MSAA%s\n", msaa,
+		    supersample > 1 ? " over supersampling" : "");
+	}
+
+	// How the numbers the shaders write are meant to be read, and what the
+	// display can currently do with them.
+	//
+	// This is the startup default. A script asking for EDR or colour management
+	// does it from psi.boot, which runs after this, and
+	// PSIMetalContext::apply_output_mode() prints a matching line when it does.
+	const char *output = "BGRA8Unorm (unmanaged)";
+	if (_metal_ctx->edr_output()) {
+		output = "RGBA16Float (EDR)";
+	} else if (_metal_ctx->color_managed()) {
+		output = "BGRA8Unorm_sRGB (colour managed)";
+	}
+	say("[video] output     %s, display headroom %.2fx\n",
+	    output, _metal_ctx->edr_headroom());
+
+	say("[video] present    vsync %s\n", _vsync ? "on" : "off");
+	// get_device_info_str() already begins "Metal device: ", so it is the whole
+	// line rather than a value on one.
+	say("[video] %s\n", _metal_ctx->get_device_info_str().c_str());
 }
 
 void PSIVideo::print_viewport_dimensions() {
@@ -378,7 +454,7 @@ GLFWmonitor *PSIVideo::get_fullscreen_monitor() const {
 		dest_monitor = monitors[0];
 	}
 
-	psilog(PSILog::VIDEO, "Using monitor \"%s\"", glfwGetMonitorName(dest_monitor));
+	psilog(PSILog::INIT, "Using monitor \"%s\"", glfwGetMonitorName(dest_monitor));
 
 	return dest_monitor;
 }
