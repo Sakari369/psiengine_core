@@ -134,28 +134,35 @@ bool PSIVideo::init() {
 	// Apple silicon caps MSAA at 4x for this format, so supersample on top of it
 	// to get edges smoother than multisampling alone can manage.
 	//
-	// 2x, meaning four times the pixels of the window. It was 3x, spent against
-	// 2x MSAA; the same budget buys more as 2x supersampling against 4x MSAA,
-	// because MSAA is nearly free at this resolution (see DEF_MSAA_SAMPLES) and
-	// supersampling is priced in whole rendered pixels.
+	// 1: no supersampling at all, because temporal antialiasing replaced it.
 	//
-	// Sample counts barely move -- 4 shading samples times 4 coverage samples
-	// against 9 times 2 -- and the cost does. Fullscreen at 2560x1440, gpu ms,
-	// 3x/2xMSAA then 2x/4xMSAA:
+	// This was 3, then 2. Supersampling answers aliasing by rendering more
+	// pixels than the display has and averaging them, which costs N^2 fill for
+	// N^2 samples and is the whole reason fullscreen was slow. TAA takes one
+	// sample per pixel per frame at a different sub-pixel offset each time and
+	// averages across frames instead, so a still image converges on far more
+	// samples than 2x ever gave for the cost of one extra texture read.
 	//
-	//   plasma_cube  13.37 -> 4.98      prism_grid  2.99 -> 1.91
+	// Measured on plasma_cube frame 90, as high-frequency energy against a 2x
+	// supersampled render of the same frame (0.0500):
 	//
-	// Captured frames of both were compared at 3x magnification on prism_grid's
-	// grazing prism silhouettes, which are the worst case in the tree, and are
-	// not tellable apart; whole-frame RMSE across plasma_cube, prism_grid,
-	// starfield, merkaba and text is 0.1-0.4%.
+	//   2x supersampled, no TAA   0.0500  (the reference)
+	//   TAA at 1x, no sharpen     0.0363  (73%)
+	//   TAA at 1x, sharpen 0.5    0.0523  (105%)
 	//
-	// Still supersampled rather than MSAA alone, for the original reason: MSAA
-	// does nothing at all for shader aliasing, and the LED strips reflected in
-	// plasma_cube's diamond are the sharpest thing in any of these scenes.
+	// So with the sharpen it carries as much detail as the thing it replaces.
+	// Fullscreen gpu cost over the same change: plasma_cube 5.05 -> 2.6 ms,
+	// merkaba 0.93 -> 0.6.
 	//
-	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request.
-	int supersample = 2;
+	// MSAA stays at 4 and is doing something different: it is coverage within a
+	// single frame, which is what keeps a thin edge from flickering in and out
+	// between jitter offsets before the history has anything to average.
+	//
+	// PSI_SUPERSAMPLE=1..4 overrides, and wins over a script's own request. Note
+	// that raising it with TAA on is not free the way it was: the temporal pass
+	// runs at the display's size either way, so the extra pixels are spent
+	// entirely on the scene.
+	int supersample = 1;
 	const char *ss_env = getenv("PSI_SUPERSAMPLE");
 	if (ss_env != nullptr) {
 		int parsed = atoi(ss_env);
@@ -169,18 +176,21 @@ bool PSIVideo::init() {
 	}
 	_metal_ctx->set_supersample_factor(supersample);
 
-	// Antialiasing mode. Off is the supersample-plus-MSAA behaviour that
-	// predates the temporal path; taa adds the jitter, the velocity pass and the
-	// history, and is what makes a supersample factor of 1 worth running at.
+	// Antialiasing mode, and TAA is the default.
 	//
-	// Read here rather than from a script so a capture or a benchmark can pin it
-	// the same way PSI_SUPERSAMPLE does.
+	// PSI_AA=off goes back to the supersample-plus-MSAA behaviour that predates
+	// it -- which at the supersample default of 1 means MSAA alone, so anything
+	// comparing against the old look wants PSI_SUPERSAMPLE=2 with it.
+	//
+	// Read from the environment rather than from a script so a capture or a
+	// benchmark can pin it the same way PSI_SUPERSAMPLE does.
+	int aa_mode = PSIMetalContext::AA_TAA;
 	const char *aa_env = getenv("PSI_AA");
 	if (aa_env != nullptr) {
-		const bool want_taa = (std::string(aa_env) == "taa");
-		_metal_ctx->set_aa_mode(want_taa ? PSIMetalContext::AA_TAA
-		                                 : PSIMetalContext::AA_OFF);
+		aa_mode = (std::string(aa_env) == "taa") ? PSIMetalContext::AA_TAA
+		                                         : PSIMetalContext::AA_OFF;
 	}
+	_metal_ctx->set_aa_mode(aa_mode);
 
 	_metal_ctx->set_vsync(_vsync);
 	if (_vsync) {

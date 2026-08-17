@@ -1578,10 +1578,25 @@ void PSIMetalContext::present() {
 	// in the scene -- and it keeps the TAA-off path bit-identical to before.
 	float sharpen = 0.0f;
 
-	if (taa_enabled() && _taa_input != nullptr && _scene_dirty) {
-		if (encode_box_filter(_scene_texture, _taa_input,
-		                      _render_size, _drawable_size, _supersample, 0.0f)) {
-			MTL::Texture *resolved = encode_taa(_taa_input);
+	if (taa_enabled() && _scene_dirty) {
+		// What the temporal pass reads, at the display's size.
+		//
+		// At a supersample factor of 1 -- the default now that TAA does the
+		// antialiasing -- the scene texture is already that size, and filtering
+		// it into _taa_input would be a full-screen copy that changed nothing.
+		MTL::Texture *taa_source = nullptr;
+
+		if (_supersample <= 1) {
+			taa_source = _scene_texture;
+		} else if (_taa_input != nullptr
+		        && encode_box_filter(_scene_texture, _taa_input,
+		                             _render_size, _drawable_size,
+		                             _supersample, 0.0f)) {
+			taa_source = _taa_input;
+		}
+
+		if (taa_source != nullptr) {
+			MTL::Texture *resolved = encode_taa(taa_source);
 			if (resolved != nullptr) {
 				shown = resolved;
 				shown_size = _drawable_size;
@@ -1589,9 +1604,12 @@ void PSIMetalContext::present() {
 				sharpen = _taa_sharpen;
 			} else {
 				// TAA sat this frame out -- no velocity buffer yet, or the
-				// pipeline failed. The downsampled frame is still correct, it
-				// simply has not been accumulated.
-				shown = _taa_input;
+				// pipeline failed. Whatever the temporal pass was going to
+				// read is still a correct frame, it simply has not been
+				// accumulated. taa_source and not _taa_input: at a factor of
+				// 1 nothing is ever written into the latter, so showing it
+				// would put an uninitialised texture on screen.
+				shown = taa_source;
 				shown_size = _drawable_size;
 				factor = 1;
 			}
